@@ -24,9 +24,39 @@ views and functions it defines.
 | Route | What |
 |---|---|
 | `/` | Play order: ranked list with drag-reorder, tag filter, finished toggles, tags, splitting |
+| `/roll` | Roll for something to play within an hours range and a tag filter, with a live pool count |
 | `/series` | Series editor: create, drag to order, add games, delete |
 | `/sizes` | The short / medium / long buckets, grouped and filterable. New — the old UI had no equivalent |
 | `/add` | Add a game. The name box searches your collection by `contains` as you type |
+
+### `/roll`
+
+Two sliders set a minimum and maximum length, the tag chips narrow it further,
+and the number beside the button is how many games currently fit — recomputed as
+you drag.
+
+The sliders move over **indexes into a fixed list of detents**
+(`0,1,2,…,20,30,40,60,100,150,200,∞`) rather than over hours. The playable pool
+runs from half an hour to 718, with a median around 18 and 90% under 60, so
+evenly spaced hours would bury almost every game in the leftmost sliver of the
+track. The top detent means "no maximum", which is the only way the 718h outlier
+stays reachable at all. MudBlazor 9 has no two-thumb range slider, hence two
+sliders that shove each other instead of refusing to cross.
+
+The count is computed **in memory**: `GetRollPoolAsync` loads `custom.v_roll_pool`
+once when the page opens, and each slider move filters that list. The slider
+fires on every pixel of a drag, so querying per event would be a round trip per
+pixel. Tags are lowercased once at load for the same reason. Only the draw itself
+goes to the database, through `custom.game_roll_range()`.
+
+Each tag chip shows what the pool *would* be with that chip also on, so a
+combination that narrows to nothing reads `0` before you click it.
+
+The pool is playable units only, which is why the range is trustworthy: a game
+queued behind an unfinished predecessor is not in it, so nothing has to be
+redirected afterwards and the range you asked for holds for the game you are
+handed. A split collection appears as its playable part, badged with what it is
+inside.
 
 ### `/add`
 
@@ -46,9 +76,9 @@ The average is never entered; Postgres computes it.
 ## Where the logic lives
 
 Almost nowhere here. `Backlog.Web/Data/BacklogRepository.cs` is thin SQL over
-`custom.v_game`, `custom.v_unit` and `custom.v_game_tiers`; the blocking rules,
-the finished roll-up and the tier boundaries are all computed in
-`db/install.sql`.
+`custom.v_game`, `custom.v_unit`, `custom.v_roll_pool` and
+`custom.v_game_tiers`; the blocking rules, the finished roll-up, the tier
+boundaries and what counts as rollable are all computed in `db/install.sql`.
 
 **Keep it that way.** If a query here starts re-deriving something a view
 already computes, the two definitions will drift.
@@ -61,12 +91,20 @@ a deliberate choice; the precise length inside that bucket should stay a
 surprise.
 
 So `UiState.ShowHours` is off by default and nothing prints an hours figure —
-not the part rows, not the size cards, not the grid. The timer icon in the app
-bar reveals them when you actually want the number.
+not the part rows, not the size cards, not the grid, not the game `/roll` hands
+you. The timer icon in the app bar reveals them when you actually want the
+number.
 
-Hiding the column is not sufficient on its own: `/sizes` sorts by **name** while
-hidden, because a list ordered by length still reads as a ranking of length even
-with the numbers stripped. It switches to sorting by hours only once revealed.
+Hiding the column is not sufficient on its own: `/sizes` and `/roll`'s pool
+listing sort by **name** while hidden, because a list ordered by length still
+reads as a ranking of length even with the numbers stripped. They switch to
+sorting by hours only once revealed.
+
+The one thing that shows either way is `/roll`'s range readout ("3h – 4h"). That
+is the bound *you* just dragged, not a fact about any game — echoing your own
+input back gives nothing away. Narrowing the range to a single detent and rolling
+does tell you roughly how long the result is, but that is the same deliberate
+trade as picking a size bucket.
 
 ## Things that look like details but are not
 

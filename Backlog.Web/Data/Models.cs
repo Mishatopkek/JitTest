@@ -59,3 +59,42 @@ public sealed record TierRow(
 
 /// <summary>The three piles the play-order screen works in.</summary>
 public sealed record Board(List<Game> Ranked, List<Game> Unranked, List<Game> Done);
+
+/// <summary>
+/// One unit you could start right now, from custom.v_roll_pool. The roll screen
+/// holds the whole pool so it can count matches as the sliders move without
+/// going back to the database on every drag event.
+/// </summary>
+public sealed record RollUnit(
+    int GameId,
+    int? PartId,
+    string UnitName,
+    string OwnedAs,
+    decimal Hours,
+    int? Priority,
+    string[] Tags)
+{
+    /// <summary>True when this unit is one game inside a collection you own.</summary>
+    public bool IsPart => PartId is not null;
+}
+
+/// <summary>
+/// What custom.game_roll_range() landed on. No "redirected" field, unlike
+/// game_roll(): the range pool is playable units only, so there is never an
+/// unfinished predecessor to be sent back to.
+/// </summary>
+public sealed record RollResult(
+    string StartName,
+    string OwnedAs,
+    decimal Hours,
+    int? Priority,
+    string[] Tags,
+    string? Series,
+    int? SeriesSlot,
+    long? SeriesTotal,
+    long PoolSize,
+    int GameId,
+    int? PartId)
+{
+    public bool IsPart => PartId is not null;
+}

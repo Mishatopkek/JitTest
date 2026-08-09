@@ -248,6 +248,42 @@ the filter has to hold for the game you actually play.
 Neither can offer a game with no recorded hours — the tiering drops those.
 `v_game_stats.missing_hours` counts them.
 
+### A third roll: `game_roll_range`, by hours instead of bucket
+
+`custom.game_roll_range(min, max, tags)` answers the question the three buckets
+cannot: *"I have four hours tonight."* Three `NTILE` thirds only ever mean
+"shortish / middling / longish", and because they are thirds of a pool that
+shrinks as you finish things, "short" is not a stable promise about length.
+
+```sql
+SELECT * FROM custom.game_roll_range(2, 6);                     -- inclusive both ends
+SELECT * FROM custom.game_roll_range(20, NULL);                 -- 20h and up
+SELECT * FROM custom.game_roll_range(NULL, 4, ARRAY['Handheld']);
+```
+
+Either bound may be `NULL` for "open that side". That matters at the top: the
+pool runs past 700 hours, so any literal upper stop on the `/roll` slider would
+quietly exclude the longest game — the last detent sends `NULL` instead.
+
+It returns one extra column over `game_roll`: `pool_size`, the number of units
+that matched *before* the draw, so you can tell "1 of 30" from "1 of 1". When
+nothing matches it returns **no rows at all** rather than an empty pick.
+
+**It does not redirect, and does not need to.** It draws from `v_roll_pool`,
+which is playable units only — and "playable" already excludes anything queued
+behind an unfinished predecessor, so there is never a series head to be sent
+back to. That is what makes the range trustworthy: unlike `game_roll`, the hours
+and the tags hold for the game you are actually told to start.
+
+`v_roll_pool` is the single definition of that pool. `v_game_tiers` is built on
+top of it rather than restating its `WHERE` clause, so the buckets can never
+bucket a different set of games than the roll draws from, and the live count on
+`/roll` counts the same rows.
+
+By the same token `game_roll`'s own redirect branch is, in practice,
+unreachable — it joins `v_game_tiers`, which is also playable-only. It is left
+in place rather than changed underneath existing callers.
+
 Nothing else is gated. Tier boundaries in `v_game_tiers` and `v_game_tier_stats`
 are still computed over the full unfinished backlog, so recording a series does
 not silently move what counts as "short".
@@ -281,7 +317,7 @@ dotnet run --project Backlog.Web
 ```
 
 Then <http://localhost:5064>. Drag to reorder, tick to finish, chips to filter by
-tag, plus a series editor and a size browser.
+tag, plus a series editor, a size browser and `/roll`.
 
 `JitTest` no longer has anything to do with games — it is back to being the two
 endpoints it started as, demonstrating `volatile` under different memory models.
@@ -331,6 +367,35 @@ The editor always fetches the current parts before opening, so it is never blank
 for a game that has them. It used to read from a cache filled only for
 *expanded* rows — editing a collapsed split showed an empty box, and confirming
 read as "no parts" and wiped the split.
+
+#### Roll tab
+
+`/roll` is the range roll with a UI on it. Two sliders set the bounds, the tag
+chips narrow it further (ANDed, as everywhere else), and the count next to the
+button updates as you drag.
+
+The sliders run over **indexes into a fixed list of detents**
+(`0,1,2,…,20,30,40,60,100,150,200,∞`), not over hours directly. The playable pool
+has a median of ~18h, 90% of it under 60h, and one 718h outlier: an evenly spaced
+hour scale would spend nine tenths of the track on games that are not there. The
+last detent on the upper slider is "no maximum", which is how that outlier stays
+reachable. MudBlazor has no two-thumb range control, so this is two sliders that
+push each other rather than refusing to cross.
+
+The count is computed **in memory**, not by querying per drag event — the page
+loads `v_roll_pool` once when it opens. Each tag chip shows what the pool would
+be if that chip were also on, so a dead-end combination reads `0` before you
+commit to it. Only the draw itself goes to the database, via
+`game_roll_range()`.
+
+The chosen range is always visible even when lengths are hidden: it is what you
+just typed, not a fact about any game. The **drawn game's** hours stay behind the
+timer toggle, and the pool listing sorts by name while hidden — same reasoning as
+`/sizes`.
+
+If the pool has emptied since the page loaded (something finished in another
+tab), the roll comes back with nothing, says so, and reloads the pool rather than
+showing a stale count.
 
 #### Series tab
 

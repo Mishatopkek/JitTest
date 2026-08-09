@@ -62,6 +62,27 @@ SELECT * FROM custom.game_roll('medium', ARRAY['Handheld', 'PC']);
 SELECT start_name, start_hours FROM custom.game_roll('short');
 
 
+-- Roll by ACTUAL HOURS instead of one of three buckets -- "I have four hours
+-- tonight" rather than "give me something shortish". Bounds are inclusive and
+-- NULL leaves that side open. pool_size says how many units matched before the
+-- draw, so you can tell "1 of 30" from "1 of 1".
+--
+-- This is what the /roll page in Backlog.Web drives.
+SELECT * FROM custom.game_roll_range(2, 6);        -- a two-to-six hour evening
+SELECT * FROM custom.game_roll_range(NULL, 4);     -- anything under 4h
+SELECT * FROM custom.game_roll_range(40, NULL);    -- something to sink into
+SELECT * FROM custom.game_roll_range(2, 6, ARRAY['Handheld']);
+
+-- No redirect here, unlike game_roll: the pool is playable units only, so the
+-- range and the tags hold for the game you are actually handed.
+SELECT start_name, start_hours, pool_size FROM custom.game_roll_range(2, 6);
+
+-- The pool itself, which is what both the range roll and the tiers draw from.
+SELECT unit_name, game_name AS owned_as, hours, priority, tags
+FROM custom.v_roll_pool
+ORDER BY hours;
+
+
 -- --- what is in each size ----------------------------------------------------
 
 -- Every playable game in every bucket, shortest first. This is the exact pool

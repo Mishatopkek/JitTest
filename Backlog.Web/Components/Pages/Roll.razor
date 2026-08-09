@@ -1,0 +1,362 @@
+@page "/roll"
+@implements IDisposable
+@inject BacklogRepository Repo
+@inject UiState Ui
+@inject ISnackbar Snackbar
+
+<PageTitle>Roll</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1">Roll for something to play</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Say how long you have and it draws from everything that fits. The pool is
+    what you can actually <em>start</em> — anything waiting on an earlier game in
+    its collection or series is already excluded, so the range holds for the game
+    you are handed rather than for whatever the dice hit first.
+</MudText>
+
+@if (_pool is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <div class="d-flex align-center flex-wrap gap-2 mb-2">
+            <MudText Typo="Typo.overline">Length</MudText>
+            <MudSpacer />
+            @* The chosen bounds are the user's own input, not a game's length,
+               so they show regardless of the hours toggle -- nothing is given
+               away by echoing back what you just dragged. *@
+            <MudText Typo="Typo.subtitle1">@RangeLabel</MudText>
+        </div>
+
+        @* MudBlazor 9 has no two-thumb range slider, so this is two sliders that
+           clamp against each other. Both run over INDEXES into Stops, not over
+           hours: the pool spans 0.5h to 718h, and a linear hour scale would bury
+           90% of the games in the leftmost sliver of the track. *@
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">At least</MudText>
+        <MudSlider T="int" Value="_minIdx" ValueChanged="OnMinChanged"
+                   Min="0" Max="@(Stops.Count - 1)" Step="1"
+                   Color="Color.Primary" Class="mb-2" />
+
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">At most</MudText>
+        <MudSlider T="int" Value="_maxIdx" ValueChanged="OnMaxChanged"
+                   Min="0" Max="@Stops.Count" Step="1"
+                   Color="Color.Primary" />
+
+        <div class="d-flex align-center flex-wrap gap-2 mt-3">
+            <MudText Typo="Typo.overline">Tags</MudText>
+
+            @foreach (var tag in _tags)
+            {
+                var key = tag.ToLowerInvariant();
+                var on = _activeTags.Contains(key);
+                @* Count is what the pool WOULD be with this chip also on, so a
+                   dead-end combination reads 0 before you commit to it. *@
+                <MudChip T="string"
+                         Variant="@(on ? Variant.Filled : Variant.Outlined)"
+                         Color="@(on ? Color.Primary : Color.Default)"
+                         Size="Size.Small"
+                         OnClick="@(() => ToggleTag(key))">
+                    @tag <span class="mud-text-disabled ml-1">@CountWith(key, on)</span>
+                </MudChip>
+            }
+
+            @if (_activeTags.Count > 0)
+            {
+                <MudChip T="string" Variant="Variant.Text" Size="Size.Small"
+                         OnClick="ClearTags">clear</MudChip>
+            }
+        </div>
+    </MudPaper>
+
+    <div class="d-flex align-center flex-wrap gap-4 mb-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Rounded.Casino"
+                   Disabled="@(_matching.Count == 0 || _rolling)"
+                   OnClick="RollAsync">
+            @(_result is null ? "Roll" : "Roll again")
+        </MudButton>
+
+        @* The live pool size. Recomputed in memory on every slider move -- see
+           GetRollPoolAsync -- so dragging does not hit the database. *@
+        <div>
+            <MudText Typo="Typo.h5" Class="d-inline">@_matching.Count</MudText>
+            <MudText Typo="Typo.body2" Class="d-inline mud-text-secondary">
+                @(_matching.Count == 1 ? "game fits" : "games fit")
+            </MudText>
+            <MudText Typo="Typo.caption" Class="d-block mud-text-secondary">
+                of @_pool.Count you can start
+            </MudText>
+        </div>
+    </div>
+
+    @if (_matching.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
+            Nothing in that range@(_activeTags.Count > 0 ? " with those tags" : "").
+            Widen it and the count moves.
+        </MudAlert>
+    }
+
+    @if (_result is not null)
+    {
+        <MudPaper Outlined="true" Class="pa-4 mb-4">
+            <MudText Typo="Typo.overline" Class="mud-text-secondary">Play this</MudText>
+            <MudText Typo="Typo.h5">@_result.StartName</MudText>
+
+            <div class="d-flex align-center flex-wrap gap-2 mt-2">
+                @if (_result.IsPart)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Icon="@Icons.Material.Rounded.Inventory2">
+                        inside @_result.OwnedAs
+                    </MudChip>
+                }
+
+                @if (_result.Series is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Icon="@Icons.Material.Rounded.Timeline">
+                        @_result.Series
+                        @if (_result.SeriesSlot is not null && _result.SeriesTotal is not null)
+                        {
+                            @($" {_result.SeriesSlot} of {_result.SeriesTotal}")
+                        }
+                    </MudChip>
+                }
+
+                @if (_result.Priority is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Icon="@Icons.Material.Rounded.Bookmark">
+                        ranked #@_result.Priority
+                    </MudChip>
+                }
+
+                @* Gated: the drawn game's actual length is exactly the thing the
+                   hours toggle exists to keep back. The range you picked is
+                   already on screen above, which is as much as you asked to know. *@
+                @if (Ui.ShowHours)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Icon="@Icons.Material.Rounded.Timer">
+                        @_result.Hours.ToString("0.#")h
+                    </MudChip>
+                }
+
+                @foreach (var tag in _result.Tags)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@tag</MudChip>
+                }
+            </div>
+
+            <MudText Typo="Typo.caption" Class="mud-text-secondary mt-2 d-block">
+                drawn from @_result.PoolSize that fit
+            </MudText>
+        </MudPaper>
+    }
+
+    @* Collapsed, and sorted by name while hours are hidden -- same reasoning as
+       /sizes: a list ordered by length is a ranking of length even with the
+       numbers stripped off. *@
+    <MudExpansionPanels Elevation="0">
+        <MudExpansionPanel Text="@($"What is in the pool ({_matching.Count})")">
+            @if (_matching.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Nothing fits.</MudText>
+            }
+            else
+            {
+                <MudSimpleTable Dense="true" Hover="true" Elevation="0" Striped="false">
+                    <thead>
+                        <tr>
+                            <th>Game</th>
+                            <th>Inside</th>
+                            @if (Ui.ShowHours)
+                            {
+                                <th style="text-align:right">Hours</th>
+                            }
+                            <th style="text-align:right">Rank</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in PoolListing)
+                        {
+                            <tr>
+                                <td>@u.UnitName</td>
+                                <td>@(u.IsPart ? u.OwnedAs : "")</td>
+                                @if (Ui.ShowHours)
+                                {
+                                    <td style="text-align:right">@u.Hours.ToString("0.#")</td>
+                                }
+                                <td style="text-align:right">@(u.Priority?.ToString() ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+}
+
+@code {
+    /// <summary>
+    /// Slider detents, in hours. Deliberately uneven: the playable pool is 193
+    /// units with a median of 18h, 90% of it under 60h, and a single 718h
+    /// outlier. Even steps would spend most of the track on games that are not
+    /// there. One index past the end of this list means "no upper limit", which
+    /// is how the top of the range reaches that outlier at all.
+    /// </summary>
+    private static readonly List<decimal> Stops =
+    [
+        0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200
+    ];
+
+    private int _minIdx;
+    private int _maxIdx = Stops.Count;   // starts at "no limit", so the first
+                                         // view of the page is the whole pool
+
+    private List<RollUnit>? _pool;
+    private List<string> _tags = [];
+    private readonly HashSet<string> _activeTags = [];
+
+    private RollResult? _result;
+    private bool _rolling;
+
+    /// <summary>
+    /// Pool entries with their tags pre-lowercased. Rebuilding a HashSet per unit
+    /// per drag event is the kind of per-row work that adds up when the slider
+    /// fires on every pixel.
+    /// </summary>
+    private sealed record Entry(RollUnit Unit, HashSet<string> Tags);
+
+    private List<Entry> _entries = [];
+
+    /// <summary>Current matches. Recomputed only when the range or tags change.</summary>
+    private List<RollUnit> _matching = [];
+
+    private decimal MinHours => Stops[_minIdx];
+
+    /// <summary>null once the top thumb is past the last stop: no upper bound.</summary>
+    private decimal? MaxHours => _maxIdx >= Stops.Count ? null : Stops[_maxIdx];
+
+    private string RangeLabel =>
+        (MinHours, MaxHours) switch
+        {
+            (0, null)      => "any length",
+            (var lo, null) => $"{lo:0.#}h and up",
+            (0, var hi)    => $"up to {hi:0.#}h",
+            var (lo, hi)   => $"{lo:0.#}h – {hi:0.#}h"
+        };
+
+    private IEnumerable<RollUnit> PoolListing => Ui.ShowHours
+        ? _matching.OrderBy(u => u.Hours)
+        : _matching.OrderBy(u => u.UnitName, StringComparer.CurrentCultureIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ui.Changed += Redraw;
+
+        _pool = await Repo.GetRollPoolAsync();
+        _tags = await Repo.GetTagsAsync();
+
+        _entries = _pool
+            .Select(u => new Entry(u, u.Tags.Select(t => t.ToLowerInvariant()).ToHashSet()))
+            .ToList();
+
+        Recount();
+    }
+
+    public void Dispose() => Ui.Changed -= Redraw;
+
+    private void Redraw() => InvokeAsync(StateHasChanged);
+
+    private void OnMinChanged(int value)
+    {
+        _minIdx = value;
+        // Dragging one thumb past the other pushes it rather than refusing to
+        // move, which is what a real range control does.
+        if (_minIdx > _maxIdx) _maxIdx = _minIdx;
+        Recount();
+    }
+
+    private void OnMaxChanged(int value)
+    {
+        _maxIdx = value;
+        if (_maxIdx < _minIdx) _minIdx = _maxIdx;
+        Recount();
+    }
+
+    private void ToggleTag(string tag)
+    {
+        if (!_activeTags.Remove(tag)) _activeTags.Add(tag);
+        Recount();
+    }
+
+    private void ClearTags()
+    {
+        _activeTags.Clear();
+        Recount();
+    }
+
+    private void Recount() =>
+        _matching = _entries.Where(e => Matches(e, _activeTags)).Select(e => e.Unit).ToList();
+
+    private bool Matches(Entry e, HashSet<string> wantTags)
+    {
+        if (e.Unit.Hours < MinHours) return false;
+        if (MaxHours is { } max && e.Unit.Hours > max) return false;
+
+        // AND, not OR -- matching game_by_tag(), game_roll() and the play-order
+        // screen. Picking PC + co-op means both.
+        return wantTags.Count == 0 || wantTags.All(e.Tags.Contains);
+    }
+
+    /// <summary>Size of the pool if this chip were also on, so a dead end shows 0 first.</summary>
+    private int CountWith(string tag, bool alreadyOn)
+    {
+        var want = alreadyOn ? _activeTags : new HashSet<string>(_activeTags) { tag };
+        return _entries.Count(e => Matches(e, want));
+    }
+
+    private async Task RollAsync()
+    {
+        _rolling = true;
+        try
+        {
+            _result = await Repo.RollRangeAsync(
+                // An open bottom and 0 are the same pool; send NULL so the
+                // function does the trivial thing.
+                MinHours == 0 ? null : MinHours,
+                MaxHours,
+                _activeTags);
+
+            if (_result is null)
+            {
+                // The pool was loaded when the page opened. Something finished
+                // or got blocked since, so the count on screen was stale.
+                Snackbar.Add("Nothing matched any more — reloading the pool.",
+                    MudBlazor.Severity.Warning);
+                await ReloadPoolAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Roll failed: {ex.Message}", MudBlazor.Severity.Error);
+        }
+        finally
+        {
+            _rolling = false;
+        }
+    }
+
+    private async Task ReloadPoolAsync()
+    {
+        _pool = await Repo.GetRollPoolAsync();
+        _entries = _pool
+            .Select(u => new Entry(u, u.Tags.Select(t => t.ToLowerInvariant()).ToHashSet()))
+            .ToList();
+        Recount();
+    }
+}

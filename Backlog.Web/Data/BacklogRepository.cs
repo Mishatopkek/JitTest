@@ -229,6 +229,89 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
         return (int)(await cmd.ExecuteScalarAsync(ct))!;
     }
 
+    /// <summary>
+    /// The whole rollable pool in one query. The roll screen recounts matches on
+    /// every slider move, and that has to stay off the database -- 200-odd rows
+    /// filtered in memory beats a round trip per drag event.
+    /// </summary>
+    public async Task<List<RollUnit>> GetRollPoolAsync(CancellationToken ct = default)
+    {
+        await using var cmd = db.CreateCommand(
+            """
+            SELECT game_id, part_id, unit_name, game_name, hours, priority, tags
+            FROM custom.v_roll_pool
+            ORDER BY unit_name
+            """);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        List<RollUnit> units = [];
+        while (await reader.ReadAsync(ct))
+        {
+            units.Add(new RollUnit(
+                reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetDecimal(4),
+                reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                reader.GetFieldValue<string[]>(6)));
+        }
+
+        return units;
+    }
+
+    /// <summary>
+    /// Roll a playable unit whose length falls in [minHours, maxHours] and which
+    /// carries every one of <paramref name="tags"/>.
+    /// </summary>
+    /// <param name="minHours">null leaves the bottom open.</param>
+    /// <param name="maxHours">null leaves the top open -- which is what the last
+    /// stop on the slider means, since the pool runs past 700 hours.</param>
+    /// <returns>null when nothing matched.</returns>
+    public async Task<RollResult?> RollRangeAsync(
+        decimal? minHours,
+        decimal? maxHours,
+        IEnumerable<string> tags,
+        CancellationToken ct = default)
+    {
+        await using var cmd = db.CreateCommand(
+            """
+            SELECT start_name, owned_as, start_hours, start_priority, start_tags,
+                   series, series_slot, series_total, pool_size,
+                   start_game_id, start_part_id
+            FROM custom.game_roll_range(@min, @max, @tags)
+            """);
+
+        cmd.Parameters.Add(new NpgsqlParameter("min", NpgsqlDbType.Numeric)
+            { Value = (object?)minHours ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("max", NpgsqlDbType.Numeric)
+            { Value = (object?)maxHours ?? DBNull.Value });
+
+        // An empty array would demand a game carrying no tags at all; the
+        // function wants NULL for "do not filter on tags".
+        var wanted = tags.ToArray();
+        cmd.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
+            { Value = wanted.Length == 0 ? DBNull.Value : wanted });
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (!await reader.ReadAsync(ct)) return null;
+
+        return new RollResult(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetDecimal(2),
+            reader.IsDBNull(3) ? null : reader.GetInt32(3),
+            reader.GetFieldValue<string[]>(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.IsDBNull(6) ? null : reader.GetInt32(6),
+            reader.IsDBNull(7) ? null : reader.GetInt64(7),
+            reader.GetInt64(8),
+            reader.GetInt32(9),
+            reader.IsDBNull(10) ? null : reader.GetInt32(10));
+    }
+
     public async Task<List<string>> GetTagsAsync(CancellationToken ct = default)
     {
         await using var cmd = db.CreateCommand(

@@ -44,8 +44,10 @@ Key objects:
 |---|---|
 | `v_game_unit` / `v_unit` | one row per *playable unit*; the grain everything else works at |
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
-| `v_game_tiers` | playable units bucketed short/medium/long by `NTILE(3)` |
-| `game_roll()` | rolls for something to play; redirects to a series head |
+| `v_roll_pool` | the units you can start right now, with tags; **the one definition of the rollable pool** |
+| `v_game_tiers` | `v_roll_pool` bucketed short/medium/long by `NTILE(3)` |
+| `game_roll()` | rolls by bucket; redirects to a series head |
+| `game_roll_range()` | rolls by an hours range + tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
 
 ## Domain rules that are easy to break
@@ -65,18 +67,36 @@ to the user.
    in `game_completion_times`; the games inside it live in `game_part`.
 6. **Blocking spans both parts and series** — `v_unit` computes it. Render
    `blocked_by`; never re-derive it.
-7. **Tag filtering is AND**, matching `game_by_tag()` and `game_roll()`.
+7. **Tag filtering is AND**, matching `game_by_tag()`, `game_roll()` and
+   `game_roll_range()`.
 8. **Finishing a ranked game freezes its priority.** The `finished = false`
    guard in the unrank statement must stay.
 9. **`hours_average` is a generated column.** Naming it in an INSERT raises.
+10. **`v_roll_pool` is playable units only, and that is load-bearing.**
+    "Playable" already excludes anything queued behind an unfinished
+    predecessor, which is *why* `game_roll_range()` needs no series redirect —
+    the range and the tags therefore hold for the game you are handed. Widen
+    that view to unplayable units and the range starts lying. (`game_roll()`
+    still carries a redirect, but it joins the same playable pool, so in
+    practice that branch is unreachable; it is left alone rather than changed
+    underneath its callers.)
 
 ## UI conventions
 
 **Lengths are hidden by default** (`UiState.ShowHours`). Seeing "2h" next to a
 title spoils the surprise of rolling for something. Do not add an hours figure
-to any view without checking that flag. `/sizes` also sorts by *name* while
-hidden, because a list ordered by length leaks length even with the numbers
-stripped.
+to any view without checking that flag. `/sizes` and `/roll` also sort by *name*
+while hidden, because a list ordered by length leaks length even with the
+numbers stripped.
+
+The exception is a length the user *typed*: `/roll`'s range readout ("3h – 4h")
+is their own input echoed back, not a fact about any game, so it shows either
+way. The drawn game's actual hours stay behind the flag.
+
+**`/roll`'s pool count is computed in memory, on purpose.** The page loads
+`v_roll_pool` once and filters ~200 rows per slider move. The slider fires on
+every pixel of a drag, so a query per event would be a round trip per pixel.
+Tags are pre-lowercased at load for the same reason.
 
 **Interactivity is global**, set on `<Routes>` and `<HeadOutlet>` in
 `App.razor`. Per-page `@rendermode` leaves the layout static and its buttons

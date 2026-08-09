@@ -334,8 +334,52 @@ FROM custom.game_completion_times;
 -- restricted to playable units, so a game you cannot start yet does not shift
 -- the boundaries of a bucket you are choosing from.
 --
+-- THE rollable pool: every unit you could sit down and start right now, with
+-- its tags attached. One definition, because three different things draw from
+-- it -- v_game_tiers below, game_roll_range(), and the live count on /roll --
+-- and they must not disagree about what is eligible.
+--
+-- "playable" already means unfinished AND not blocked by an earlier unit in its
+-- collection or series, so a mid-series game cannot appear here at all. That is
+-- what lets game_roll_range() skip the series redirect that game_roll() does:
+-- there is nothing to redirect away from. See the note on that function.
+--
+-- hours IS NOT NULL is required by every consumer: NTILE would file unmeasured
+-- games under "long", and an hours range cannot say anything about a game whose
+-- length is unknown. v_game_stats.missing_hours counts what this drops.
+DROP VIEW IF EXISTS custom.v_roll_pool CASCADE;
+CREATE VIEW custom.v_roll_pool AS
+SELECT u.game_id,
+       u.part_id,
+       u.unit_name,
+       u.game_name,
+       u.hours,
+       u.priority,
+       u.series,
+       u.series_id,
+       u.series_position,
+       coalesce(tg.tags, '{}'::text[]) AS tags
+FROM custom.v_unit u
+LEFT JOIN LATERAL (
+    SELECT array_agg(t.tag_name::text ORDER BY t.tag_name) AS tags
+    FROM custom.game_tag_link l
+    JOIN custom.tag t ON t.id = l.tag_id
+    WHERE l.game_id = u.game_id
+) tg ON true
+WHERE u.playable
+  AND u.hours IS NOT NULL;
+
+COMMENT ON VIEW custom.v_roll_pool IS
+    'Units you can start right now, with tags. The single definition of the '
+    'pool that v_game_tiers, game_roll_range() and the /roll count all use.';
+
+
 -- v_game_tier_stats is built on this view, so it must be dropped first --
 -- a bare DROP VIEW fails while a dependent view exists.
+--
+-- Built on v_roll_pool rather than restating its WHERE clause, so the tiers can
+-- never bucket a different set of games than the roll draws from. Column list
+-- is unchanged: game_random(), game_roll() and the app all join to it.
 DROP VIEW IF EXISTS custom.v_game_tier_stats;
 DROP VIEW IF EXISTS custom.v_game_tiers CASCADE;
 CREATE VIEW custom.v_game_tiers AS
@@ -351,9 +395,7 @@ SELECT game_id AS id,          -- kept so old queries joining on id still work
            WHEN 2 THEN 'medium'
            ELSE        'long'
        END                            AS tier_name
-FROM custom.v_unit
-WHERE playable
-  AND hours IS NOT NULL;
+FROM custom.v_roll_pool;
 
 
 -- Your hand-ranked play order, best first.
@@ -933,7 +975,7 @@ BEGIN
                          AND lower(t.tag_name) = lower(btrim(want.tag_name)))))
         ORDER BY random()
         LIMIT 1
-    )
+    ),
     -- head is the earliest unfinished entry of the drawn game's series. It is
     -- the drawn game itself when that was already the head, and no rows at all
     -- when the game is in no series -- hence the coalesce back to d.
@@ -991,6 +1033,104 @@ $$;
 COMMENT ON FUNCTION custom.game_roll(text, text[]) IS
     'Roll for a game; if the draw lands mid-series, redirect to that series'' '
     'first unfinished entry. Filters apply to the draw, not the redirect.';
+
+
+-- Roll from an explicit hours range instead of a tier.
+--     SELECT * FROM custom.game_roll_range(2, 6);
+--     SELECT * FROM custom.game_roll_range(20, NULL);              -- 20h and up
+--     SELECT * FROM custom.game_roll_range(NULL, 4, ARRAY['VR']);  -- under 4h, VR
+--
+-- Why this exists alongside game_roll(): three NTILE buckets answer "give me
+-- something shortish", but not "I have four hours tonight". The tiers also move
+-- as you finish things, so "short" is not a stable promise about length. A range
+-- is.
+--
+-- Bounds are inclusive and either may be NULL for "unbounded that side", which
+-- is how the top of the slider on /roll means "no maximum" -- the pool runs to
+-- 700+ hours and a literal upper stop would exclude the longest game.
+--
+-- Unlike game_roll() this does NOT redirect, because it cannot need to:
+-- v_roll_pool is playable units only, and "playable" already excludes anything
+-- standing behind an unfinished predecessor. So the range and the tags hold for
+-- the game you are actually told to start, which is the whole point of saying
+-- how much time you have. (game_roll() draws from the same playable pool via
+-- its v_game_tiers join, so its redirect is in practice already unreachable --
+-- left alone here rather than changed underneath its callers.)
+--
+-- Tags are AND, matching game_by_tag() and game_roll(): ARRAY['PC','co-op']
+-- means both.
+DROP FUNCTION IF EXISTS custom.game_roll_range(numeric, numeric, text[]);
+CREATE OR REPLACE FUNCTION custom.game_roll_range(p_min   numeric  DEFAULT NULL,
+                                                  p_max   numeric  DEFAULT NULL,
+                                                  p_tags  text[]   DEFAULT NULL)
+    RETURNS TABLE (
+        start_name     text,   -- the part, when the thing to play is in a collection
+        owned_as       text,   -- the row you actually own
+        start_hours    numeric,
+        start_priority int,
+        start_tags     text[],
+        series         text,
+        series_slot    int,
+        series_total   bigint,
+        pool_size      bigint, -- how many units the filter matched, before the draw
+        start_game_id  int,
+        start_part_id  int)
+    LANGUAGE plpgsql
+    VOLATILE
+AS $$
+BEGIN
+    IF p_min IS NOT NULL AND p_max IS NOT NULL AND p_min > p_max THEN
+        RAISE EXCEPTION
+            'game_roll_range: min (%) is above max (%)', p_min, p_max
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    RETURN QUERY
+    WITH pool AS (
+        SELECT r.*
+        FROM custom.v_roll_pool r
+        WHERE (p_min IS NULL OR r.hours >= p_min)
+          AND (p_max IS NULL OR r.hours <= p_max)
+          AND (p_tags IS NULL
+               OR NOT EXISTS (
+                   SELECT 1
+                   FROM unnest(p_tags) AS want(tag_name)
+                   WHERE NOT EXISTS (
+                       SELECT 1
+                       FROM unnest(r.tags) AS has(tag_name)
+                       WHERE lower(has.tag_name) = lower(btrim(want.tag_name)))))
+    ),
+    -- Counted over the whole matched pool, not just the drawn row, so the caller
+    -- can tell "1 of 12" from "1 of 1" -- and gets 0 rows back when nothing
+    -- matched at all rather than a silent empty pick.
+    sized AS (SELECT count(*) AS n FROM pool)
+    SELECT p.unit_name,
+           p.game_name,
+           p.hours,
+           p.priority,
+           p.tags,
+           p.series,
+           p.series_position,
+           tot.games,
+           sized.n,
+           p.game_id,
+           p.part_id
+    FROM pool p
+    CROSS JOIN sized
+    LEFT JOIN LATERAL (
+        SELECT count(*) AS games
+        FROM custom.game_completion_times x
+        WHERE x.series_id = p.series_id
+    ) tot ON p.series_id IS NOT NULL
+    ORDER BY random()
+    LIMIT 1;
+END;
+$$;
+
+COMMENT ON FUNCTION custom.game_roll_range(numeric, numeric, text[]) IS
+    'Roll a playable unit whose length falls in [p_min, p_max] (NULL = open '
+    'that side) and which carries all of p_tags. No series redirect: the pool '
+    'is playable units, so the range holds for what you are told to play.';
 
 
 -- Insert a game and hand back the stored row.
