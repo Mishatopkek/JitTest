@@ -28,6 +28,64 @@
 }
 else
 {
+    @* The shape of what is left. The three cards below are always a third each
+       by construction, so they cannot answer "is my backlog mostly quick hits or
+       mostly monsters" -- this can.
+
+       Deliberately NOT behind UiState.ShowHours. The bars name no game, so
+       nothing here tells you how long any particular title is; it describes the
+       collection, which is the same thing the bucket counts below already do. *@
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <MudText Typo="Typo.subtitle2">Games you can start, by length</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+            @_bandTotal playable units. Bands are narrow where the games are —
+            half of them sit under @_medianLabel.
+        </MudText>
+
+        @* One series, so no legend: the heading names it, and a second colour
+           would be encoding nothing. Value labels are off on purpose -- a number
+           over all ten bars is noise; the tooltip and the table carry the exact
+           counts. *@
+        @* Height covers plot AND the x-axis band, so the axis labels are not cut
+           off into a nested scrollbar. *@
+        <MudChart T="double"
+                  ChartType="ChartType.Bar"
+                  ChartSeries="_bandSeries"
+                  ChartLabels="_bandLabels"
+                  ChartOptions="_bandOptions"
+                  Width="100%" Height="300px" />
+
+        <MudText Typo="Typo.caption" Align="Align.Center"
+                 Class="mud-text-secondary d-block">
+            hours per game
+        </MudText>
+
+        @* The chart's table twin: every value on it is readable without hover. *@
+        <MudExpansionPanels Elevation="0" Class="mt-2">
+            <MudExpansionPanel Text="Show as a table" Dense="true">
+                <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+                    <thead>
+                        <tr>
+                            <th>Length (hours)</th>
+                            <th style="text-align:right">Games</th>
+                            <th style="text-align:right">Hours in band</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var band in _bands)
+                        {
+                            <tr>
+                                <td>@band.Label</td>
+                                <td style="text-align:right">@band.Units</td>
+                                <td style="text-align:right">@band.BandHours.ToString("0.#")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    </MudPaper>
+
     <MudGrid Class="mb-4">
         @foreach (var g in _rows.GroupBy(r => new { r.Tier, r.TierName }).OrderBy(g => g.Key.Tier))
         {
@@ -93,6 +151,45 @@ else
 @code {
     private List<TierRow>? _rows;
 
+    private List<LengthBand> _bands = [];
+    private List<ChartSeries<double>> _bandSeries = [];
+    private string[] _bandLabels = [];
+    private int _bandTotal;
+    private string _medianLabel = "";
+
+    /// <summary>
+    /// Bars are the theme primary, one colour for every bar. These bands are an
+    /// ordered scale, so a light-to-dark ramp across them would be defensible,
+    /// but MudBlazor's palette indexes by SERIES rather than by bar -- one series
+    /// gets one colour -- and per-bar shading would mean hand-drawing the chart.
+    /// The x-axis carries the ordering, which is where a reader looks for it.
+    ///
+    /// The colour is a CSS variable rather than a literal so the chart follows
+    /// MainLayout.Theme and dark mode without this page knowing either.
+    /// </summary>
+    private readonly BarChartOptions _bandOptions = new()
+    {
+        ChartPalette = ["var(--mud-palette-primary)"],
+        // Horizontal rules only. Verticals on a histogram fence off each bar and
+        // add nothing -- the bars are already separated.
+        XAxisLines = false,
+        YAxisLines = true,
+        // Counts are whole games; a "12.5 games" tick would be nonsense.
+        YAxisFormat = "0",
+        YAxisTitle = "games",
+        // No XAxisTitle: MudBlazor renders it above the plot, where it reads as a
+        // second heading contradicting the real one. The x label goes underneath
+        // the chart as a caption instead.
+        ShowLegend = false,
+        ShowToolTips = true,
+        // A number stamped over all ten bars is noise and goes unread. The
+        // tooltip and the table below carry the exact counts.
+        ShowValues = false,
+        // Leaves a gap between neighbouring bars instead of a solid block of
+        // colour, and keeps the marks thin rather than heavy.
+        BarWidthRatio = 0.65
+    };
+
     // Hiding the Hours column is not enough on its own -- a list ordered by
     // length still reads as a ranking of length. Sort by name unless revealed.
     private IEnumerable<TierRow> Ordered => Ui.ShowHours
@@ -103,6 +200,36 @@ else
     {
         Ui.Changed += Redraw;
         _rows = await Repo.GetTiersAsync();
+
+        _bands = await Repo.GetLengthBandsAsync();
+        _bandLabels = _bands.Select(b => b.Label).ToArray();
+        _bandSeries = [new ChartSeries<double>
+        {
+            Name = "Games",
+            Data = new ChartData<double>(_bands.Select(b => (double)b.Units).ToArray())
+        }];
+        _bandTotal = _bands.Sum(b => b.Units);
+        _medianLabel = MedianLabel();
+    }
+
+    /// <summary>
+    /// Which band the middle game falls in, walked over the band counts rather
+    /// than over hours -- the caption is about the chart's own buckets, and this
+    /// way it cannot drift from whatever bands the view defines.
+    /// </summary>
+    private string MedianLabel()
+    {
+        if (_bandTotal == 0) return "—";
+
+        var half = _bandTotal / 2;
+        var seen = 0;
+        foreach (var band in _bands)
+        {
+            seen += band.Units;
+            if (seen >= half) return $"{band.Label}h";
+        }
+
+        return _bands[^1].Label + "h";
     }
 
     public void Dispose() => Ui.Changed -= Redraw;

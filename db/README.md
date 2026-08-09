@@ -368,6 +368,33 @@ for a game that has them. It used to read from a cache filled only for
 *expanded* rows — editing a collapsed split showed an empty box, and confirming
 read as "no parts" and wiped the split.
 
+#### The distribution chart on /sizes
+
+`custom.v_game_length_bands` counts the startable pool into fixed hour bands —
+`0–2, 2–4, 4–6, 6–10, 10–15, 15–20, 20–30, 30–40, 40–60, 60+` — and `/sizes`
+draws it as a bar chart. It answers what three equal thirds cannot: whether
+what's left is mostly quick hits or mostly monsters. Thirds are always a third
+each.
+
+```sql
+SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
+```
+
+Three things about the view:
+
+- **Bands are half-open, `[lo, hi)`**, so nothing is double-counted and a game
+  sitting exactly on a boundary lands in the upper band. `sum(units)` equals
+  `count(*)` from `v_roll_pool` exactly.
+- **The join is a LEFT JOIN** so an empty band still returns its row. Dropping it
+  would close the gap on the chart's x-axis and misdescribe the distribution.
+- **The top band is open-ended** because the pool reaches 718 hours, and the bands
+  are deliberately uneven — narrow where the games are. 90% of the pool is under
+  60h with a median near 18h, so even 70-hour-wide bands would put nearly
+  everything in the first bar.
+
+Built on `v_roll_pool`, like `v_game_tiers`, so the chart cannot describe a
+different set of games than the roll draws from.
+
 #### Roll tab
 
 `/roll` is the range roll with a UI on it. One track with two thumbs sets the

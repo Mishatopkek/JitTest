@@ -452,6 +452,53 @@ GROUP BY tier, tier_name
 ORDER BY tier;
 
 
+-- The shape of what is left to play: how many startable games sit in each length
+-- band. Where v_game_tier_stats answers "where did NTILE cut", this answers "is
+-- the backlog mostly quick hits or mostly monsters", which the three equal
+-- thirds structurally cannot show -- thirds are always a third each.
+--
+-- Bands are half-open, [lo, hi), so nothing is counted twice and a game sitting
+-- exactly on a boundary lands in the upper band. The top band is open-ended
+-- because the pool reaches 718 hours.
+--
+-- Bands are deliberately uneven, narrow where the games are: 90% of the pool is
+-- under 60h with a median near 18h, so even 70-hour-wide bands would put almost
+-- everything in the first bar and say nothing.
+--
+-- LEFT JOIN, not an inner one: an empty band must still return its row. Dropping
+-- it would close the gap on the chart's x-axis and misdescribe the distribution.
+DROP VIEW IF EXISTS custom.v_game_length_bands;
+CREATE VIEW custom.v_game_length_bands AS
+WITH band (ord, label, lo, hi) AS (
+    VALUES ( 1, '0–2',    0::numeric,  2::numeric),
+           ( 2, '2–4',    2,           4),
+           ( 3, '4–6',    4,           6),
+           ( 4, '6–10',   6,          10),
+           ( 5, '10–15', 10,          15),
+           ( 6, '15–20', 15,          20),
+           ( 7, '20–30', 20,          30),
+           ( 8, '30–40', 30,          40),
+           ( 9, '40–60', 40,          60),
+           (10, '60+',   60,          NULL)
+)
+SELECT b.ord,
+       b.label,
+       b.lo                                              AS from_hours,
+       b.hi                                              AS to_hours,
+       count(r.game_id)                                  AS units,
+       round(coalesce(sum(r.hours), 0)::numeric, 1)      AS band_hours
+FROM band b
+LEFT JOIN custom.v_roll_pool r
+       ON r.hours >= b.lo
+      AND (b.hi IS NULL OR r.hours < b.hi)
+GROUP BY b.ord, b.label, b.lo, b.hi
+ORDER BY b.ord;
+
+COMMENT ON VIEW custom.v_game_length_bands IS
+    'Distribution of the startable pool across length bands -- the shape of the '
+    'backlog. Half-open bands, empty ones included, top band open-ended.';
+
+
 -- Exact duplicates: same name once punctuation, spacing and case are stripped.
 --
 -- NOTE: your original ran regexp_replace(game_name, '[^a-z0-9]', ...) BEFORE

@@ -77,6 +77,11 @@ SELECT * FROM custom.game_roll_range(2, 6, ARRAY['Handheld']);
 -- range and the tags hold for the game you are actually handed.
 SELECT start_name, start_hours, pool_size FROM custom.game_roll_range(2, 6);
 
+-- The shape of what is left: how many startable games sit in each length band.
+-- This is what the chart at the top of /sizes draws. Three equal thirds cannot
+-- tell you whether the backlog is mostly quick hits or mostly monsters; this can.
+SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
+
 -- The pool itself, which is what both the range roll and the tiers draw from.
 SELECT unit_name, game_name AS owned_as, hours, priority, tags
 FROM custom.v_roll_pool

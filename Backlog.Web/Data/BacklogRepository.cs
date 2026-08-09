@@ -230,6 +230,36 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
     }
 
     /// <summary>
+    /// How the startable pool spreads across length bands -- the shape of the
+    /// backlog. Bands, boundaries and the empty-band rows are all decided by
+    /// custom.v_game_length_bands; this only reads them, so the chart cannot
+    /// disagree with the view about where a band starts.
+    /// </summary>
+    public async Task<List<LengthBand>> GetLengthBandsAsync(CancellationToken ct = default)
+    {
+        await using var cmd = db.CreateCommand(
+            """
+            SELECT label, units, band_hours
+            FROM custom.v_game_length_bands
+            ORDER BY ord
+            """);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        List<LengthBand> bands = [];
+        while (await reader.ReadAsync(ct))
+        {
+            bands.Add(new LengthBand(
+                reader.GetString(0),
+                // count(*), so bigint on the wire.
+                (int)reader.GetInt64(1),
+                reader.GetDecimal(2)));
+        }
+
+        return bands;
+    }
+
+    /// <summary>
     /// The whole rollable pool in one query. The roll screen recounts matches on
     /// every slider move, and that has to stay off the database -- 200-odd rows
     /// filtered in memory beats a round trip per drag event.

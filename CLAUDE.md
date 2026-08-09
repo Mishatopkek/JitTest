@@ -46,6 +46,7 @@ Key objects:
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
 | `v_roll_pool` | the units you can start right now, with tags; **the one definition of the rollable pool** |
 | `v_game_tiers` | `v_roll_pool` bucketed short/medium/long by `NTILE(3)` |
+| `v_game_length_bands` | `v_roll_pool` counted into fixed hour bands — the distribution `/sizes` charts |
 | `game_roll()` | rolls by bucket; redirects to a series head |
 | `game_roll_range()` | rolls by an hours range + tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
@@ -97,6 +98,25 @@ way. The drawn game's actual hours stay behind the flag.
 `v_roll_pool` once and filters ~200 rows per slider move. The slider fires on
 every pixel of a drag, so a query per event would be a round trip per pixel.
 Tags are pre-lowercased at load for the same reason.
+
+**Charts come from `MudChart`, and the bands come from the database.** The
+distribution on `/sizes` reads `v_game_length_bands`; band edges are never
+recomputed in C#. Conventions that chart follows, and any new one should:
+
+- **One series → one colour and no legend.** The heading names the series. Never
+  shade bars by their own value — bar length already encodes it.
+- **Colours are `var(--mud-palette-*)`**, passed straight into `ChartPalette`,
+  which MudBlazor emits into the SVG. So a chart follows the theme and dark mode
+  without the page knowing which is active.
+- **No value label on every bar** (`ShowValues = false`). The hover tooltip and a
+  table view carry exact numbers; ten stamped numbers are noise.
+- **Every chart has a table twin.** A tooltip must never be the only way to read
+  a value.
+- Aggregate charts are **not** gated behind `ShowHours`: they name no game, so
+  they cannot spoil a title. Anything naming a game still is.
+- Axis options live on the per-type options class (`BarChartOptions`), not on the
+  base `ChartOptions`. Skip `XAxisTitle` — MudBlazor renders it *above* the plot,
+  where it reads as a second heading.
 
 **Interactivity is global**, set on `<Routes>` and `<HeadOutlet>` in
 `App.razor`. Per-page `@rendermode` leaves the layout static and its buttons

@@ -79,6 +79,12 @@ public sealed record RollUnit(
 }
 
 /// <summary>
+/// One length band of the startable pool, from custom.v_game_length_bands.
+/// Bands are half-open and ordered short to long; the last one is open-ended.
+/// </summary>
+public sealed record LengthBand(string Label, int Units, decimal BandHours);
+
+/// <summary>
 /// What custom.game_roll_range() landed on. No "redirected" field, unlike
 /// game_roll(): the range pool is playable units only, so there is never an
 /// unfinished predecessor to be sent back to.

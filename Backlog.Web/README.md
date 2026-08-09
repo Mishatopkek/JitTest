@@ -26,8 +26,39 @@ views and functions it defines.
 | `/` | Play order: ranked list with drag-reorder, tag filter, finished toggles, tags, splitting |
 | `/roll` | Roll for something to play within an hours range and a tag filter, with a live pool count |
 | `/series` | Series editor: create, drag to order, add games, delete |
-| `/sizes` | The short / medium / long buckets, grouped and filterable. New — the old UI had no equivalent |
+| `/sizes` | Distribution chart of what's left by length, plus the short / medium / long buckets, grouped and filterable |
 | `/add` | Add a game. The name box searches your collection by `contains` as you type |
+
+### `/sizes`
+
+The bar chart at the top answers the one question three equal thirds structurally
+cannot: is what's left mostly quick hits or mostly monsters? Thirds are always a
+third each; the bands show the real shape. It reads
+`custom.v_game_length_bands` — the band edges live in that view, never in C#, so
+the chart and the roll can't disagree about where a band starts.
+
+Conventions it follows, and that any chart added here should:
+
+- **One series, so one colour and no legend** — the heading names it. Bars are
+  never shaded by their own value; the bar length already encodes that, and
+  spending colour on it would say nothing new. These bands *are* an ordered scale,
+  so a light-to-dark ramp across them would be defensible, but MudBlazor's
+  `ChartPalette` indexes by series rather than by bar, and per-bar shading would
+  mean hand-drawing the chart.
+- **The colour is `var(--mud-palette-primary)`** handed to `ChartPalette`, which
+  MudBlazor writes into the SVG — so the chart follows the theme and dark mode
+  with nothing hardcoded and no second code path.
+- **No number stamped on each bar** (`ShowValues = false`). Ten of them are noise.
+  Hover gives the exact count, and "Show as a table" lists every value, so the
+  tooltip is never the only way to read one.
+- **Not hidden behind the hours toggle.** The chart names no game, so it cannot
+  tell you how long any particular title is — it describes the collection, same as
+  the bucket counts underneath it. Anything that names a game still obeys the flag.
+
+Two MudBlazor specifics worth knowing before touching it: axis options are on
+`BarChartOptions` (the base `ChartOptions` has only palette/legend/tooltips), and
+`XAxisTitle` renders *above* the plot where it reads as a second heading — hence
+the plain caption under the chart instead.
 
 ### `/roll`
 
