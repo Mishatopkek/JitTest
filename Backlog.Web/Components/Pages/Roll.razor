@@ -30,19 +30,21 @@ else
             <MudText Typo="Typo.subtitle1">@RangeLabel</MudText>
         </div>
 
-        @* MudBlazor 9 has no two-thumb range slider, so this is two sliders that
-           clamp against each other. Both run over INDEXES into Stops, not over
-           hours: the pool spans 0.5h to 718h, and a linear hour scale would bury
-           90% of the games in the leftmost sliver of the track. *@
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">At least</MudText>
-        <MudSlider T="int" Value="_minIdx" ValueChanged="OnMinChanged"
-                   Min="0" Max="@(Stops.Count - 1)" Step="1"
-                   Color="Color.Primary" Class="mb-2" />
+        @* Both thumbs run over INDEXES into Stops, not over hours: the pool spans
+           0.5h to 718h, and a linear hour scale would bury 90% of the games in
+           the leftmost sliver of the track. The upper thumb reaches one index
+           past the last stop, which means "no maximum". *@
+        <RangeSlider Min="0" Max="@Stops.Count"
+                     LowValue="_minIdx" LowValueChanged="OnMinChanged"
+                     HighValue="_maxIdx" HighValueChanged="OnMaxChanged"
+                     LowLabel="Shortest" HighLabel="Longest"
+                     LowValueText="@HoursLabel(_minIdx)"
+                     HighValueText="@HoursLabel(_maxIdx)" />
 
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">At most</MudText>
-        <MudSlider T="int" Value="_maxIdx" ValueChanged="OnMaxChanged"
-                   Min="0" Max="@Stops.Count" Step="1"
-                   Color="Color.Primary" />
+        <div class="d-flex justify-space-between">
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@HoursLabel(0)</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">no limit</MudText>
+        </div>
 
         <div class="d-flex align-center flex-wrap gap-2 mt-3">
             <MudText Typo="Typo.overline">Tags</MudText>
@@ -238,6 +240,10 @@ else
 
     private decimal MinHours => Stops[_minIdx];
 
+    /// <summary>What a thumb at this index reads as. The last index is unbounded.</summary>
+    private static string HoursLabel(int index) =>
+        index >= Stops.Count ? "∞" : $"{Stops[index]:0.#}h";
+
     /// <summary>null once the top thumb is past the last stop: no upper bound.</summary>
     private decimal? MaxHours => _maxIdx >= Stops.Count ? null : Stops[_maxIdx];
 
@@ -274,7 +280,11 @@ else
 
     private void OnMinChanged(int value)
     {
-        _minIdx = value;
+        // Both thumbs share one track, so the lower one can be dragged to the
+        // "no maximum" index -- which would mean a minimum of infinity. Stop it
+        // one stop short, and keep MinHours a safe index into Stops.
+        _minIdx = Math.Clamp(value, 0, Stops.Count - 1);
+
         // Dragging one thumb past the other pushes it rather than refusing to
         // move, which is what a real range control does.
         if (_minIdx > _maxIdx) _maxIdx = _minIdx;

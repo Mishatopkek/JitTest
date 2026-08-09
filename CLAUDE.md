@@ -107,9 +107,20 @@ A freshly built list each render desynchronises its reorder bookkeeping and rows
 render jumbled.
 
 **Do not hand-write CSS.** The point of MudBlazor here is that styling comes
-from the library. The only exception is the pre-hydration block in
-`wwwroot/app.css`, which must be plain CSS because it runs before any C# does;
-its colours are duplicated from `MainLayout.Theme` on purpose.
+from the library. Two exceptions, both deliberate:
+
+- the pre-hydration block in `wwwroot/app.css`, which must be plain CSS because
+  it runs before any C# does; its colours are duplicated from
+  `MainLayout.Theme` on purpose.
+- `Components/Shared/RangeSlider.razor.css`, because MudBlazor 9.8 has no
+  two-thumb slider (`MudSlider` is single-value, `MudRangeInput` is two *text*
+  fields) and a native `<input type=range>` has one thumb by spec, so the track
+  has to be drawn by hand. Its colours come from `--mud-palette-*` variables,
+  never literals, so themes and dark mode follow without that file knowing.
+
+`MainLayout.razor.css` and `ReconnectModal.razor.css` are **not** precedents for
+app styling — they style `#blazor-error-ui` and `#components-reconnect-modal`,
+Blazor template DOM that MudBlazor does not own.
 
 ## Working style
 

@@ -370,17 +370,22 @@ read as "no parts" and wiped the split.
 
 #### Roll tab
 
-`/roll` is the range roll with a UI on it. Two sliders set the bounds, the tag
-chips narrow it further (ANDed, as everywhere else), and the count next to the
-button updates as you drag.
+`/roll` is the range roll with a UI on it. One track with two thumbs sets the
+bounds, the tag chips narrow it further (ANDed, as everywhere else), and the count
+next to the button updates as you drag.
 
-The sliders run over **indexes into a fixed list of detents**
+The thumbs run over **indexes into a fixed list of detents**
 (`0,1,2,…,20,30,40,60,100,150,200,∞`), not over hours directly. The playable pool
 has a median of ~18h, 90% of it under 60h, and one 718h outlier: an evenly spaced
 hour scale would spend nine tenths of the track on games that are not there. The
-last detent on the upper slider is "no maximum", which is how that outlier stays
-reachable. MudBlazor has no two-thumb range control, so this is two sliders that
-push each other rather than refusing to cross.
+last detent is "no maximum", which is how that outlier stays reachable; the lower
+thumb is clamped one stop short of it, a minimum of infinity being meaningless.
+Dragging one thumb past the other pushes it.
+
+MudBlazor 9.8 has no dual-thumb slider, so the control is hand-built in
+`Backlog.Web/Components/Shared/RangeSlider.razor` — two native range inputs over
+a shared rail. One consequence: clicking the bare track does nothing, because the
+inputs' own tracks are pointer-transparent and only the thumbs are hit targets.
 
 The count is computed **in memory**, not by querying per drag event — the page
 loads `v_roll_pool` once when it opens. Each tag chip shows what the pool would

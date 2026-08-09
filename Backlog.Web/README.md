@@ -31,17 +31,34 @@ views and functions it defines.
 
 ### `/roll`
 
-Two sliders set a minimum and maximum length, the tag chips narrow it further,
-and the number beside the button is how many games currently fit — recomputed as
-you drag.
+One track with two thumbs sets the minimum and maximum length, the tag chips
+narrow it further, and the number beside the button is how many games currently
+fit — recomputed as you drag.
 
-The sliders move over **indexes into a fixed list of detents**
+The thumbs move over **indexes into a fixed list of detents**
 (`0,1,2,…,20,30,40,60,100,150,200,∞`) rather than over hours. The playable pool
 runs from half an hour to 718, with a median around 18 and 90% under 60, so
 evenly spaced hours would bury almost every game in the leftmost sliver of the
 track. The top detent means "no maximum", which is the only way the 718h outlier
-stays reachable at all. MudBlazor 9 has no two-thumb range slider, hence two
-sliders that shove each other instead of refusing to cross.
+stays reachable at all — and dragging the *lower* thumb onto it is clamped one
+stop short, because a minimum of infinity is meaningless.
+
+Dragging one thumb past the other pushes it rather than refusing to move.
+
+The control is `Components/Shared/RangeSlider.razor`, and it is the one piece of
+hand-written app CSS here — see the note in `CLAUDE.md`. MudBlazor 9.8 has no
+dual-thumb slider (`MudSlider` is single-value, `MudRangeInput` is two *text*
+fields) and a native range input has one thumb by spec, so it is two range inputs
+over a shared rail, their own tracks made transparent and pointer-transparent so
+only the thumbs are grabbable. Consequences worth knowing:
+
+- **Clicking the bare track does nothing** — the thumbs are the only hit targets.
+  Grab a thumb, or focus one and use the arrow keys.
+- When both thumbs sit on the same pixel, the one with room to travel gets the
+  higher `z-index`, so a collapsed range can always be pulled back open. Without
+  that rule the buried thumb is unreachable and the range sticks at zero width.
+- Thumb and fill colours are `--mud-palette-*` variables, so the theme and dark
+  mode carry over. Nothing in that file hardcodes a colour.
 
 The count is computed **in memory**: `GetRollPoolAsync` loads `custom.v_roll_pool`
 once when the page opens, and each slider move filters that list. The slider

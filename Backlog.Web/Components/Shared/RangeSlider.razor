@@ -1,0 +1,87 @@
+@* One track, two thumbs.
+
+   MudBlazor 9.8 has no dual-thumb slider -- MudSlider is single-value,
+   MudRangeInput is two text fields, and Range<T> is a bare data holder -- and a
+   native <input type=range> is single-thumb by spec. So this is the standard
+   construction: two range inputs stacked on the same line over a shared rail,
+   with the inputs' own tracks made transparent and pointer-transparent so only
+   the thumbs are grabbable and the rail below shows through.
+
+   This is the one place in the app with hand-written CSS. See RangeSlider.razor.css. *@
+
+<div class="rs @Class">
+    <div class="rs__rail"></div>
+    <div class="rs__fill" style="left:@Css(LowPct);width:@Css(HighPct - LowPct)"></div>
+
+    @* Thumbs only ever compete for the same pixel when the values are equal, so
+       z-index only matters then -- see LowOnTop. *@
+    <input type="range" class="rs__input"
+           style="z-index:@(LowOnTop ? 4 : 3)"
+           min="@Min" max="@Max" step="1" value="@LowValue"
+           aria-label="@LowLabel" aria-valuetext="@LowValueText"
+           @oninput="OnLowInput" />
+
+    <input type="range" class="rs__input"
+           style="z-index:@(LowOnTop ? 3 : 4)"
+           min="@Min" max="@Max" step="1" value="@HighValue"
+           aria-label="@HighLabel" aria-valuetext="@HighValueText"
+           @oninput="OnHighInput" />
+</div>
+
+@code {
+    /// <summary>Lowest selectable index, inclusive.</summary>
+    [Parameter] public int Min { get; set; }
+
+    /// <summary>Highest selectable index, inclusive.</summary>
+    [Parameter] public int Max { get; set; } = 100;
+
+    [Parameter] public int LowValue { get; set; }
+    [Parameter] public EventCallback<int> LowValueChanged { get; set; }
+
+    [Parameter] public int HighValue { get; set; }
+    [Parameter] public EventCallback<int> HighValueChanged { get; set; }
+
+    /// <summary>Screen-reader names for the two thumbs.</summary>
+    [Parameter] public string? LowLabel { get; set; }
+    [Parameter] public string? HighLabel { get; set; }
+
+    /// <summary>
+    /// What each thumb reads as out loud. The raw value is an index into
+    /// someone else's list of stops, which on its own means nothing.
+    /// </summary>
+    [Parameter] public string? LowValueText { get; set; }
+    [Parameter] public string? HighValueText { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    private double LowPct => Fraction(LowValue) * 100;
+    private double HighPct => Fraction(HighValue) * 100;
+
+    private double Fraction(int value) =>
+        Max <= Min ? 0 : (double)(Math.Clamp(value, Min, Max) - Min) / (Max - Min);
+
+    /// <summary>
+    /// Which thumb wins a click when both sit on the same pixel. Whichever one
+    /// still has room to travel goes on top, so a collapsed range can always be
+    /// pulled back open -- otherwise the buried thumb is unreachable and the
+    /// range is stuck at zero width.
+    /// </summary>
+    private bool LowOnTop => LowValue == HighValue && LowValue > (Min + Max) / 2.0;
+
+    /// <summary>
+    /// Percentages for inline styles must be invariant. A culture that writes
+    /// "12,5" would emit left:12,5% and the browser would drop the declaration.
+    /// </summary>
+    private static string Css(double percent) =>
+        percent.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private Task OnLowInput(ChangeEventArgs e) => Raise(e, LowValueChanged);
+
+    private Task OnHighInput(ChangeEventArgs e) => Raise(e, HighValueChanged);
+
+    private static Task Raise(ChangeEventArgs e, EventCallback<int> callback) =>
+        int.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Integer,
+                     System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? callback.InvokeAsync(value)
+            : Task.CompletedTask;
+}

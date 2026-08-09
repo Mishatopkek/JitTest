@@ -1,0 +1,128 @@
+/* The app's one piece of hand-written control styling.
+
+   Everything else here is styled by MudBlazor, on purpose -- see CLAUDE.md. A
+   two-thumb slider is the exception because no such component exists in
+   MudBlazor 9.8 and a native range input has one thumb by spec, so the track has
+   to be drawn by hand. Colours come from MudBlazor's palette variables rather
+   than literals, so light and dark and any theme edit follow along without this
+   file knowing about them. */
+
+.rs {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 2rem;
+    /* Half a thumb of breathing room, so the thumb does not clip at either end. */
+    padding: 0 7px;
+}
+
+.rs__rail,
+.rs__fill {
+    position: absolute;
+    height: 2px;
+    border-radius: 1px;
+    /* Decoration only. Clicks belong to the thumbs. */
+    pointer-events: none;
+}
+
+.rs__rail {
+    left: 7px;
+    right: 7px;
+    background: var(--mud-palette-lines-default);
+}
+
+/* Positioned against the same inset box as the rail. */
+.rs__fill {
+    margin: 0 7px;
+    background: var(--mud-palette-primary);
+}
+
+/* Both inputs occupy the same line. Their own tracks are invisible and ignore
+   the pointer, which is what lets the rail below show through and lets the
+   lower thumb stay clickable wherever the two do not overlap. */
+.rs__input {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 2rem;
+    margin: 0;
+    padding: 0 7px;
+    box-sizing: border-box;
+    background: transparent;
+    appearance: none;
+    -webkit-appearance: none;
+    pointer-events: none;
+}
+
+.rs__input:focus {
+    outline: none;
+}
+
+.rs__input::-webkit-slider-runnable-track {
+    height: 2px;
+    background: transparent;
+    border: 0;
+}
+
+.rs__input::-moz-range-track {
+    height: 2px;
+    background: transparent;
+    border: 0;
+}
+
+/* Firefox draws a filled "progress" portion on the track by default; this slider
+   draws its own fill between the thumbs instead. */
+.rs__input::-moz-range-progress {
+    background: transparent;
+}
+
+.rs__input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    width: 14px;
+    height: 14px;
+    /* Centres a 14px thumb on a 2px track. */
+    margin-top: -6px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--mud-palette-primary);
+    cursor: grab;
+    transition: box-shadow 150ms ease-in-out;
+}
+
+.rs__input::-moz-range-thumb {
+    pointer-events: auto;
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--mud-palette-primary);
+    cursor: grab;
+    transition: box-shadow 150ms ease-in-out;
+}
+
+.rs__input:active::-webkit-slider-thumb {
+    cursor: grabbing;
+}
+
+.rs__input:active::-moz-range-thumb {
+    cursor: grabbing;
+}
+
+/* Keyboard focus has to be visible: arrow keys on a focused thumb are the only
+   way to work this control without a pointer. */
+.rs__input:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 8px var(--mud-palette-action-default-hover);
+}
+
+.rs__input:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 8px var(--mud-palette-action-default-hover);
+}
+
+.rs__input:hover::-webkit-slider-thumb {
+    box-shadow: 0 0 0 6px var(--mud-palette-action-default-hover);
+}
+
+.rs__input:hover::-moz-range-thumb {
+    box-shadow: 0 0 0 6px var(--mud-palette-action-default-hover);
+}
