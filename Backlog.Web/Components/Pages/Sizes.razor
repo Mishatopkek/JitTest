@@ -38,27 +38,33 @@ else
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudText Typo="Typo.subtitle2">Games you can start, by length</MudText>
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-            One dot per game — all @_bandTotal of them, lined up shortest to
-            longest. Half sit under @_medianLabel.
+            @_bandTotal playable units, counted hour by hour — half sit under
+            @_medianLabel. @_overflow are longer than @_capLabel and run off the
+            right of this chart; the table below has them.
         </MudText>
 
-        @* One dot per unit, no bands anywhere: x is the game's position in the
-           sorted pool and y is its own recorded length. Every value is its own
-           mark, which is as much resolution as 193 games have.
+        @* One point per hour of length, so 61 of them: y is how many games are
+           that long. Equal width throughout, so a taller point simply means more
+           games and the slope is a real rate.
 
-           One series, so no legend -- the heading names it, and a second colour
-           would encode nothing. No per-point labels: 193 of them is not a chart. *@
+           At this resolution the curve is spiky and touches zero in a dozen
+           places. That is the honest shape -- an empty point means there is no
+           game of that length, not a gap in the chart.
+
+           One series, so no legend: the heading names it. No per-point labels --
+           sixty-one numbers is not a chart; hover and the table carry them. *@
         @* Height covers plot AND the x-axis band, so the axis labels are not cut
            off into a nested scrollbar. *@
         <MudChart T="double"
-                  ChartType="ChartType.ScatterPlot"
-                  ChartSeries="_dotSeries"
-                  ChartOptions="_dotOptions"
-                  Width="100%" Height="320px" />
+                  ChartType="ChartType.Line"
+                  ChartSeries="_bandSeries"
+                  ChartLabels="_bandLabels"
+                  ChartOptions="_bandOptions"
+                  Width="100%" Height="300px" />
 
         <MudText Typo="Typo.caption" Align="Align.Center"
                  Class="mud-text-secondary d-block">
-            games, sorted shortest to longest
+            hours per game
         </MudText>
 
         @* The chart's table twin: every value on it is readable without hover. *@
@@ -153,50 +159,56 @@ else
     private List<TierRow>? _rows;
 
     private List<LengthBand> _bands = [];
-    private List<ChartSeries<double>> _dotSeries = [];
+    private List<ChartSeries<double>> _bandSeries = [];
+    private string[] _bandLabels = [];
     private int _bandTotal;
     private string _medianLabel = "";
+    private string _capLabel = "";
+    private int _overflow;
 
     /// <summary>
-    /// Every dot is the theme primary. One series, so there is no identity to
-    /// encode with a second colour, and shading a dot by its own height would
-    /// spend the colour channel on what the height already says.
+    /// One colour for every marker. One series, so there is no identity to encode
+    /// with a second, and shading a point by its own height would spend the colour
+    /// channel on what the height already says.
     ///
     /// The colour is a CSS variable rather than a literal so the chart follows
     /// MainLayout.Theme and dark mode without this page knowing either.
     /// </summary>
-    private readonly ScatterPlotChartOptions _dotOptions = new()
+    private readonly LineChartOptions _bandOptions = new()
     {
         ChartPalette = ["var(--mud-palette-primary)"],
-        // Horizontal rules only; verticals across a rank axis mean nothing.
+        // Horizontal rules only. Sixty-one verticals would be a picket fence.
         XAxisLines = false,
         YAxisLines = true,
-        YAxisTitle = "hours",
+        // Counts are whole games; a "4.5 games" tick would be nonsense.
+        YAxisFormat = "0",
+        YAxisTitle = "games",
         // No XAxisTitle: MudBlazor renders it above the plot, where it reads as a
         // second heading contradicting the real one. The x label goes underneath
         // the chart as a caption instead.
         ShowLegend = false,
         ShowToolTips = true,
-        // 193 numbers printed on 193 dots is not a chart.
-        ShowDataLabels = false,
-        // Small enough that a cluster still reads as separate games rather than a
-        // solid block.
-        PointRadius = 3,
 
-        // A length axis starts at zero; a cropped baseline would exaggerate how
-        // steeply the collection climbs.
+        // Straight segments, never a spline. A spline invents curvature between two
+        // hours and can bow below the baseline, drawing a negative number of games
+        // -- and at this resolution the curve returns to zero a dozen times, so
+        // there is plenty for one to overshoot. ClampToZero backs it up.
+        InterpolationOption = InterpolationOption.Straight,
+        ClampToZero = true,
+
+        // The measured counts, marked. With 61 points the markers are what make it
+        // read as one dot per hour rather than a single squiggle.
+        ShowDataMarkers = true,
+        LineStrokeWidth = 2,
+
+        // A count axis must start at zero, or the spikes read as far bigger than
+        // the nine games they actually are.
         YAxisRequireZeroPoint = true,
-        // Without a cap MudBlazor draws a rule every 20h -- forty gridlines for a
-        // 718h range, which buries the dots in chrome.
+        // Left alone MudBlazor picks a tick interval of 20 for a range that only
+        // reaches 9, which squeezes the curve into the bottom half of the plot.
+        // MaxNumYAxisTicks alone did not shift it; the interval is what does.
+        YAxisTicks = 2,
         MaxNumYAxisTicks = 8
-
-        // A log y-axis was tried here and does not work: MudBlazor picks "nice"
-        // tick values in whatever space the data is in, so feeding it log10(hours)
-        // produced a tick at ~19 and a label of 10^19 hours. There is no log scale
-        // and no hook to place ticks, so the axis stays linear -- which means the
-        // single 718h game flattens the rest. That 718 is not a real length: it is
-        // (52.5 + 101.5 + 2000) / 3, and only one game in the collection has a
-        // completionist figure over 500. hours_main tops out at 109.
     };
 
     // Hiding the Hours column is not enough on its own -- a list ordered by
@@ -210,26 +222,36 @@ else
         Ui.Changed += Redraw;
         _rows = await Repo.GetTiersAsync();
 
-        // One (x, y) per unit: x is its place in the sorted pool, y its own hours.
-        // No aggregation at all -- this is every recorded value, which is the most
-        // resolution 193 games can carry.
-        var points = _rows
-            .Where(r => r.Hours > 0)
-            .OrderBy(r => r.Hours!.Value)
-            .Select((r, i) => ((double)(i + 1), (double)r.Hours!.Value))
-            .ToList();
+        _bands = await Repo.GetLengthBandsAsync();
 
-        _dotSeries = [new ChartSeries<double>
+        // The open-ended tail band is left OFF the chart on purpose. Every other
+        // point covers exactly one hour; that one covers 658, so it collects 19
+        // games where the tallest real hour holds 9 -- a spike twice everything
+        // else, caused by its width rather than by the data. Plotting only the
+        // fixed-width bands keeps every point comparable. The count it holds is in
+        // the caption and the table, so nothing is hidden, only moved.
+        var plotted = _bands.Where(b => !b.IsOpenEnded).ToList();
+
+        _bandSeries = [new ChartSeries<double>
         {
             Name = "Games",
-            Data = new ChartData<double>(points)
+            Data = new ChartData<double>(plotted.Select(b => (double)b.Units).ToArray())
         }];
 
-        // The bands still back the table view: a 193-row table is not readable,
-        // and the point of a table twin is that values ARE readable.
-        _bands = await Repo.GetLengthBandsAsync();
+        // Sixty labels would overprint each other into a smear, so only every fifth
+        // hour is named and the rest are blank. MudBlazor still spaces the points
+        // evenly -- the blanks remove text, never a reading.
+        _bandLabels = plotted
+            .Select(b => b.FromHours % 5 == 0 ? $"{b.FromHours:0.#}" : "")
+            .ToArray();
+
         _bandTotal = _bands.Sum(b => b.Units);
         _medianLabel = MedianLabel();
+
+        // Read off the view, so changing the step or cap in install.sql carries
+        // through to the caption instead of drifting from it.
+        _capLabel = plotted.LastOrDefault()?.ToHours is { } cap ? $"{cap:0.#}h" : "";
+        _overflow = _bands.Where(b => b.IsOpenEnded).Sum(b => b.Units);
     }
 
     /// <summary>

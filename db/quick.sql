@@ -13,8 +13,8 @@ SET search_path TO custom, public;
 
 -- SELECT id, game_name, finished, notes FROM custom.game_search('Homeworld');
 
-SELECT id, game_name, finished, notes, tags, priority, series, series_slot FROM custom.game_info('Like A Dragon Gaiden: The Man Who Erased His Name');
-SELECT * FROM custom.game_add('Like A Dragon Gaiden: The Man Who Erased His Name', 12.5, 21.5, 33
+SELECT id, game_name, finished, notes, tags, priority, series, series_slot FROM custom.game_info('Border');
+SELECT * FROM custom.game_add('Tiny Tina''s Wonderlands', 16, 29, 52
     , '');
 
 
@@ -85,9 +85,11 @@ SELECT * FROM custom.game_roll_range(NULL, NULL, ARRAY['PC'], 3);   -- a long PC
 SELECT * FROM custom.game_roll_range(500, 600, NULL, 2);            -- tier wins
 
 -- The shape of what is left: how many startable games sit in each length band.
--- Equal 5-hour steps to 60, then one open-ended 60+. This is what the chart at the
--- top of /sizes draws. Three equal thirds cannot tell you whether the backlog is
--- mostly quick hits or mostly monsters; this can.
+-- One hour per band up to 60, then one open-ended 60+. This is what the chart at
+-- the top of /sizes draws, minus that last band -- it is 658h wide, so plotting it
+-- beside 1h bands would spike on width rather than on data. Three equal thirds
+-- cannot tell you whether the backlog is mostly quick hits or mostly monsters;
+-- this can.
 SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
 
 -- Sanity check after changing the band step: these two must agree, or a band is

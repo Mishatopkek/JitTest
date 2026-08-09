@@ -483,12 +483,16 @@ ORDER BY tier;
 -- as signal. With uniform steps a taller point means more games, full stop, and
 -- the slope of the line between two points is a real rate.
 --
--- 5 hours to 60, then ONE open-ended band. Both numbers come from the data: at 5h
--- every band holds at least one game and most hold 4 or more, while 2h steps open
--- four holes and drop the average to 6 -- sampling noise, not shape. Past 60h the
--- pool is 0-2 games per 5h step, eight points all saying "nothing out here", so
--- the tail collapses into 60+ instead. That last band is not 5h wide and will read
--- as a step up; it is labelled so, and the table twin gives its real count.
+-- ONE hour per band up to 60, then a single open-ended band: 61 points, which is
+-- about as fine as 193 games go. Twelve of those bands come out empty and the
+-- tallest holds nine, so the curve is spiky rather than smooth -- that is the
+-- honest picture at this resolution, and an empty band means there is genuinely no
+-- game that long, not a gap in the chart.
+--
+-- Cap at 60 rather than further out because past it the pool is 0-1 games per hour:
+-- extending to 100 would add forty more points, forty-three of them empty. The tail
+-- collapses into 60+ instead. That last band is not 1h wide and will read as a step
+-- up; it is labelled so, and the table gives its real count.
 --
 -- LEFT JOIN, not an inner one: an empty band must still return its row. Dropping
 -- it would close the gap on the chart's x-axis and misdescribe the distribution.
@@ -496,8 +500,8 @@ DROP VIEW IF EXISTS custom.v_game_length_bands;
 CREATE VIEW custom.v_game_length_bands AS
 WITH band AS (
     SELECT g::numeric                                    AS lo,
-           CASE WHEN g < 60 THEN (g + 5)::numeric END    AS hi
-    FROM generate_series(0, 60, 5) AS g
+           CASE WHEN g < 60 THEN (g + 1)::numeric END    AS hi
+    FROM generate_series(0, 60, 1) AS g
 )
 SELECT (row_number() OVER (ORDER BY b.lo))::int          AS ord,
        CASE WHEN b.hi IS NULL

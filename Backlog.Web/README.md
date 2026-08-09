@@ -31,34 +31,37 @@ views and functions it defines.
 
 ### `/sizes`
 
-The scatter at the top is **one dot per playable unit** — all 193, sorted shortest
-to longest, y being that unit's own recorded hours. No bucketing at all, which is
-as much resolution as 193 games carry. It is built from `GetTiersAsync`, which the
-page already loads, so it costs no extra query.
+The chart at the top counts the startable pool **hour by hour**: x is length, y is
+how many games are that long, one marker per hour up to 60. It reads
+`custom.v_game_length_bands`, so the band edges live in that view and never in C#.
 
-**Known limitation, and it is data, not the chart.** The y-axis is linear because
-MudBlazor has no log scale and faking one does not work (see below), so the single
-718h entry flattens the other 192 into the lower fifth of the plot. That 718 is not
-a length anyone would recognise: `hours_average` is the mean of `hours_main`,
-`hours_main_extra` and `hours_completionist`, and for `Age of Wonders: Planetfall`
-that is `(52.5 + 101.5 + 2000) / 3`. Exactly one game in the collection has a
-completionist figure over 500. `hours_main` tops out at 109 and `hours_main_extra`
-at 116 — either would plot cleanly on a linear axis. Fixing that one row, or
-basing the chart on a single hours column instead of the three-way average, would
-un-squash it; both are data decisions rather than chart ones.
+**Every plotted band is exactly one hour wide**, which is what makes the chart
+honest — a band twice as wide collects twice the games at the same density, so
+unequal widths make bin width read as signal. An earlier version had bands widening
+to the right and showed a peak at `20–30h` that does not exist.
 
-**A log y-axis was tried and reverted.** MudBlazor chooses "nice" tick values in
-whatever space the data arrives in, so feeding it `log10(hours)` and inverting the
-labels through `YAxisToStringFunc` produced a tick at ~19 and an axis label of
-10^19 hours. There is no log scale and no hook for placing ticks.
+At this resolution the curve is spiky and touches zero in about a dozen places.
+That is the true shape, not noise in the drawing: an empty point means no game is
+that long.
 
-`MaxNumYAxisTicks` is capped: left alone, a 718h range draws a rule every 20h and
-forty gridlines bury the dots.
+**The open-ended `60+` band is deliberately left off the chart.** It is 658 hours
+wide against neighbours of one, so it collects ~20 games where the tallest real
+hour holds 9 — a spike caused by its width, not by the data, and tall enough to
+squash everything else. The caption names its count and the table lists it, so
+nothing is hidden, only moved. Bands are capped at 60 because past there the pool
+runs 0–1 games per hour; extending to 100 would add forty points, forty-three of
+them empty.
 
-The **table view** below the chart is still the equal-5-hour-band summary from
-`custom.v_game_length_bands`. That is deliberate — a 193-row table is not readable,
-and the point of a table twin is that the values *are* readable. The chart carries
-the detail, the table the summary.
+Axis ticks name **every fifth hour**; the rest are blank strings. Sixty labels
+overprint into a smear, and MudBlazor still spaces the points evenly — the blanks
+remove text, never a reading.
+
+`YAxisTicks = 2` matters: left alone MudBlazor picks an interval of 20 for a range
+that only reaches 9, squeezing the curve into the bottom half of the plot.
+`MaxNumYAxisTicks` on its own did not shift it.
+
+The **table view** below carries all 61 bands including `60+`, so every value is
+readable without hover.
 
 Conventions it follows, and that any chart added here should:
 

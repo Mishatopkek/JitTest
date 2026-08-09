@@ -385,14 +385,15 @@ read as "no parts" and wiped the split.
 
 #### The distribution on /sizes
 
-The **chart** is one dot per playable unit — all 193, sorted shortest to longest,
-no bucketing at all. It answers what three equal thirds cannot: whether what's left
-is mostly quick hits or mostly monsters. Thirds are always a third each.
+`custom.v_game_length_bands` counts the startable pool **one hour at a time up to
+60, plus one open-ended `60+`** — 61 rows — and `/sizes` plots it as a marker per
+hour. It answers what three equal thirds cannot: whether what's left is mostly quick
+hits or mostly monsters. Thirds are always a third each.
 
-`custom.v_game_length_bands` counts the same pool into **equal 5-hour bands from 0
-to 60, plus one open-ended `60+`** — 13 points — and now backs the **table** beneath
-that chart. A 193-row table is not readable, and a table view exists so values *are*
-readable, so the chart carries the detail and the bands the summary.
+The chart plots the 60 fixed-width bands and **skips the `60+` row**: that band is
+658 hours wide against neighbours of one, so it would spike on width rather than on
+data and flatten everything else. The page names its count in the caption and the
+table lists all 61 rows, so nothing is hidden.
 
 ```sql
 SELECT label, from_hours, to_hours, units, band_hours

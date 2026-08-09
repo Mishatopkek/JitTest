@@ -46,7 +46,7 @@ Key objects:
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
 | `v_roll_pool` | units you can start right now, with tags **and their short/medium/long tier**; the one definition of the rollable pool |
 | `v_game_tiers` | thin projection of `v_roll_pool` — the `NTILE(3)` itself lives there now |
-| `v_game_length_bands` | `v_roll_pool` counted into equal hour bands — backs the table on `/sizes` |
+| `v_game_length_bands` | `v_roll_pool` counted into equal 1-hour bands to 60 + a `60+` tail — the distribution `/sizes` plots |
 | `game_roll()` | rolls by bucket; redirects to a series head |
 | `game_roll_range()` | rolls by an hours range **or** a tier, plus tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
@@ -129,12 +129,18 @@ Conventions the `/sizes` chart follows, and any new one should:
   invents curvature between measured points and can bow below the baseline,
   drawing a negative count. Keep `ShowDataMarkers` on so the measured points stay
   visible, and `YAxisRequireZeroPoint` so a count axis starts at zero.
-- **Histogram bands must be equal width.** A band twice as wide collects twice the
-  games at the same density, so unequal bands make bin width read as signal — that
-  bug had `/sizes` showing a peak at `20–30h` that does not exist. Uniform steps
-  also make a line's slope a real rate. Put the tail in one clearly-labelled
-  open-ended band rather than widening the others. (`v_game_length_bands` still
-  does this, and now backs the table view rather than the chart.)
+- **Histogram bands must be equal width, and the plot must only show equal-width
+  bands.** A band twice as wide collects twice the games at the same density, so
+  unequal widths make bin width read as signal — that bug had `/sizes` showing a
+  peak at `20–30h` that does not exist. The open-ended tail band is the same trap
+  at the end of the axis: at 1-hour steps `60+` is 658 hours wide and spikes above
+  every real point, so the chart plots only the fixed-width bands and names the
+  tail's count in the caption instead. The table view still lists every band.
+- `YAxisTicks` is the knob that controls tick spacing; `MaxNumYAxisTicks` alone did
+  nothing. Without it MudBlazor picked an interval of 20 for a range reaching 9 and
+  squashed the curve into the bottom half of the plot.
+- With many points, blank out most `ChartLabels` rather than shrinking them —
+  MudBlazor still spaces the points evenly, so a blank removes text, not a reading.
 - **There is no log axis, and faking one does not work.** MudBlazor picks "nice"
   tick values in whatever space the data arrives in, so plotting `log10(hours)`
   and inverting the labels via `YAxisToStringFunc` produced a tick at ~19 and a
