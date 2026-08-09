@@ -1,0 +1,246 @@
+@inject BacklogRepository Repo
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject UiState Ui
+@implements IDisposable
+
+<MudPaper Outlined="true" Class="pa-2">
+    <div class="d-flex align-center gap-2">
+
+        @if (Position is null && OnRank.HasDelegate && !Game.Finished)
+        {
+            <MudIconButton Icon="@Icons.Material.Rounded.Add" Size="Size.Small"
+                           title="Add to ranked" OnClick="OnRank" />
+        }
+        else if (Position is not null)
+        {
+            <MudIcon Icon="@Icons.Material.Rounded.DragIndicator" Size="Size.Small"
+                     Class="@(Draggable ? "mud-text-secondary" : "mud-text-disabled")" />
+            <MudText Typo="Typo.body2" Color="Color.Primary"
+                     Style="min-width:2.25rem;font-variant-numeric:tabular-nums;font-weight:600">
+                @Position
+            </MudText>
+        }
+
+        @* Whole-game toggle. On a split game this sets EVERY part, because the
+           parent's finished state is the roll-up of its parts. *@
+        <MudCheckBox T="bool" Value="Game.Finished" ValueChanged="SetFinishedAsync"
+                     Color="Color.Primary" Dense="true"
+                     title="@(Game.IsSplit
+                              ? (Game.Finished ? "Mark every part unplayed" : "Mark every part finished")
+                              : (Game.Finished ? "Mark unplayed" : "Mark finished"))" />
+
+        @if (Game.IsSplit)
+        {
+            <MudLink Typo="Typo.body1" Underline="Underline.None" Color="Color.Inherit"
+                     OnClick="@(() => _open = !_open)" Style="cursor:pointer"
+                     Class="@NameClass">
+                @Game.Name
+                <MudIcon Icon="@(_open ? Icons.Material.Rounded.ExpandLess : Icons.Material.Rounded.ExpandMore)"
+                         Size="Size.Small" Class="ml-1" />
+            </MudLink>
+        }
+        else
+        {
+            <MudText Typo="Typo.body1" Class="@NameClass">@Game.Name</MudText>
+        }
+
+        <MudSpacer />
+
+        @if (Game.BlockedBy is not null)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                     title="An earlier game in this series is still unfinished.">
+                after @Game.BlockedBy
+            </MudChip>
+        }
+
+        @if (Game.Series is not null)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                @Game.Series @Game.SeriesPosition@(Game.SeriesTotal is null ? "" : $"/{Game.SeriesTotal}")
+            </MudChip>
+        }
+
+        @if (Game.IsSplit)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     title="@(Game.NextUp is null ? "All parts finished" : $"Next: {Game.NextUp}")">
+                @Game.PartsFinished/@Game.Parts played
+            </MudChip>
+        }
+
+        @foreach (var tag in Game.Tags)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                     OnClose="@(() => RemoveTagAsync(tag))">@tag</MudChip>
+        }
+
+        @if (_tagging)
+        {
+            <MudAutocomplete T="string" @bind-Value="_newTag" SearchFunc="SearchTags"
+                             CoerceValue="true" Immediate="true" Dense="true"
+                             Margin="Margin.Dense" Variant="Variant.Outlined"
+                             Placeholder="tag" Style="max-width:11rem"
+                             OnKeyDown="OnTagKey" AutoFocus="true" />
+            <MudIconButton Icon="@Icons.Material.Rounded.Check" Size="Size.Small"
+                           OnClick="AddTagAsync" title="Add tag" />
+        }
+        else
+        {
+            <MudIconButton Icon="@Icons.Material.Rounded.Sell" Size="Size.Small"
+                           title="Add a tag" OnClick="@(() => _tagging = true)" />
+        }
+
+        <MudIconButton Icon="@Icons.Material.Rounded.CallSplit" Size="Size.Small"
+                       title="@(Game.IsSplit
+                                ? "Edit the games inside this purchase"
+                                : "Split this purchase into the games inside it")"
+                       OnClick="OpenSplitAsync" />
+
+        @if (Position is not null)
+        {
+            <MudIconButton Icon="@Icons.Material.Rounded.Close" Size="Size.Small"
+                           title="Unrank" OnClick="OnUnrank" />
+        }
+    </div>
+
+    @if (Game.IsSplit)
+    {
+        <MudCollapse Expanded="_open">
+            <div class="d-flex flex-column gap-1 mt-2 ml-8 pl-3"
+                 style="border-left:2px solid var(--mud-palette-lines-default)">
+                @foreach (var part in _parts)
+                {
+                    <div class="d-flex align-center gap-2">
+                        <MudCheckBox T="bool" Value="part.Finished" Dense="true" Color="Color.Primary"
+                                     ValueChanged="@(v => SetPartFinishedAsync(part, v))"
+                                     title="@(part.Finished ? "Mark unplayed" : "Mark finished")" />
+                        <MudText Typo="Typo.body2" Color="Color.Primary"
+                                 Style="min-width:1.5rem;font-variant-numeric:tabular-nums">
+                            @part.Position
+                        </MudText>
+                        <MudText Typo="Typo.body2"
+                                 Class="@(part.Finished ? "mud-text-disabled" : "")"
+                                 Style="@(part.Finished ? "text-decoration:line-through" : "")">
+                            @part.Name
+                        </MudText>
+                        <MudSpacer />
+                        @if (part.BlockedBy is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                                after @part.BlockedBy
+                            </MudChip>
+                        }
+                        @if (Ui.ShowHours && part.Hours is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                                @part.Hours.Value.ToString("0")h
+                            </MudChip>
+                        }
+                    </div>
+                }
+            </div>
+        </MudCollapse>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public Game Game { get; set; } = null!;
+    [Parameter] public int? Position { get; set; }
+    [Parameter] public bool Draggable { get; set; } = true;
+    [Parameter] public List<string> Tags { get; set; } = [];
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnRank { get; set; }
+    [Parameter] public EventCallback OnUnrank { get; set; }
+
+    private List<Part> _parts = [];
+    private bool _open;
+    private bool _tagging;
+    private string? _newTag;
+
+    private string NameClass => Game.Finished ? "mud-text-disabled" : "";
+
+    protected override void OnInitialized() => Ui.Changed += Redraw;
+
+    public void Dispose() => Ui.Changed -= Redraw;
+
+    private void Redraw() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Parts are fetched lazily, but ALWAYS before they are needed -- the old
+        // UI cached them only for expanded rows, and the split editor opened
+        // blank for a collapsed game, which read as "no parts" and wiped it.
+        if (Game.IsSplit) _parts = await Repo.GetPartsAsync(Game.Id);
+        else _parts = [];
+    }
+
+    private async Task SetFinishedAsync(bool finished)
+    {
+        await Repo.SetGameFinishedAsync(Game.Id, finished);
+        Snackbar.Add(finished ? "Finished" : "Reopened", MudBlazor.Severity.Success);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetPartFinishedAsync(Part part, bool finished)
+    {
+        await Repo.SetPartFinishedAsync(part.Id, finished);
+        // Finishing one part can unblock something anywhere in the series, so
+        // reload the whole board rather than patching this row.
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task<IEnumerable<string>> SearchTags(string? value, CancellationToken ct)
+    {
+        var pool = Tags.Where(t => !Game.Tags.Contains(t, StringComparer.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            pool = pool.Where(t => t.Contains(value, StringComparison.OrdinalIgnoreCase));
+        }
+        return Task.FromResult(pool);
+    }
+
+    private async Task OnTagKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddTagAsync();
+        else if (e.Key == "Escape") { _tagging = false; _newTag = null; }
+    }
+
+    private async Task AddTagAsync()
+    {
+        var tag = _newTag?.Trim();
+        _tagging = false;
+        _newTag = null;
+        if (string.IsNullOrEmpty(tag)) return;
+
+        await Repo.AddTagAsync(Game.Id, tag);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task RemoveTagAsync(string tag)
+    {
+        await Repo.RemoveTagAsync(Game.Id, tag);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task OpenSplitAsync()
+    {
+        var parameters = new DialogParameters<SplitDialog>
+        {
+            { x => x.GameId, Game.Id },
+            { x => x.GameName, Game.Name },
+            { x => x.Existing, _parts }
+        };
+
+        var dialog = await Dialogs.ShowAsync<SplitDialog>("Split", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            _open = true;
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

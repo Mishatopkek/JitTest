@@ -1,0 +1,111 @@
+@page "/sizes"
+@implements IDisposable
+@inject BacklogRepository Repo
+@inject UiState Ui
+
+<PageTitle>Sizes</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1">Short, medium, long</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Equal thirds of what you can actually start, not fixed hour cutoffs — so
+    "long" means the longest third of the playable pool, and the boundaries move
+    as you finish things. This is the exact pool <code>game_roll()</code> and
+    <code>game_random()</code> draw from: if a game is not here, neither can
+    offer it. A split purchase appears as its playable part.
+</MudText>
+
+@if (!Ui.ShowHours)
+{
+    <MudAlert Severity="Severity.Normal" Dense="true" Class="mb-4">
+        Lengths are hidden, so picking from a bucket stays a surprise. The timer
+        icon in the top bar reveals them.
+    </MudAlert>
+}
+
+@if (_rows is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Class="mb-4">
+        @foreach (var g in _rows.GroupBy(r => new { r.Tier, r.TierName }).OrderBy(g => g.Key.Tier))
+        {
+            <MudItem xs="12" sm="4">
+                <MudPaper Outlined="true" Class="pa-3">
+                    <MudText Typo="Typo.overline">@g.Key.TierName</MudText>
+                    <MudText Typo="Typo.h5">@g.Count()</MudText>
+                    @if (Ui.ShowHours)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            @g.Min(r => r.Hours)?.ToString("0.#")–@g.Max(r => r.Hours)?.ToString("0.#")h
+                        </MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @g.Sum(r => r.Hours ?? 0).ToString("0")h total
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">games</MudText>
+                    }
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    @* Sorted by name, not by length: ordering by hours would rank the bucket
+       shortest-first and give the lengths away without printing them. *@
+    <MudDataGrid T="TierRow" Items="Ordered" Groupable="true" Dense="true" Hover="true"
+                 Filterable="true" FilterMode="DataGridFilterMode.ColumnFilterRow"
+                 SortMode="SortMode.Multiple" Elevation="0" Outlined="true">
+        <Columns>
+            <PropertyColumn Property="x => x.TierName" Title="Size" Grouping="true" Hidden="true">
+                <GroupTemplate>
+                    <MudText Typo="Typo.subtitle2">
+                        @context.Grouping.Key (@context.Grouping.Count())
+                    </MudText>
+                </GroupTemplate>
+            </PropertyColumn>
+
+            <PropertyColumn Property="x => x.UnitName" Title="Game" />
+
+            <TemplateColumn Title="Inside" Sortable="false">
+                <CellTemplate>
+                    @if (context.Item.IsPart)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                            @context.Item.OwnedAs
+                        </MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+
+            @* Hidden rather than omitted, so revealing it keeps its place
+               instead of appending after Rank. *@
+            <PropertyColumn Property="x => x.Hours" Title="Hours" Format="0.#"
+                            Hidden="@(!Ui.ShowHours)" />
+
+            <PropertyColumn Property="x => x.Priority" Title="Rank" />
+        </Columns>
+    </MudDataGrid>
+}
+
+@code {
+    private List<TierRow>? _rows;
+
+    // Hiding the Hours column is not enough on its own -- a list ordered by
+    // length still reads as a ranking of length. Sort by name unless revealed.
+    private IEnumerable<TierRow> Ordered => Ui.ShowHours
+        ? _rows!.OrderBy(r => r.Tier).ThenBy(r => r.Hours)
+        : _rows!.OrderBy(r => r.Tier).ThenBy(r => r.UnitName);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ui.Changed += Redraw;
+        _rows = await Repo.GetTiersAsync();
+    }
+
+    public void Dispose() => Ui.Changed -= Redraw;
+
+    private void Redraw() => InvokeAsync(StateHasChanged);
+}

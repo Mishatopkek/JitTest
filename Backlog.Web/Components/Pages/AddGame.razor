@@ -1,0 +1,251 @@
+@page "/add"
+@inject BacklogRepository Repo
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject UiState Ui
+
+<PageTitle>Add a game</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1">Add a game</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    The name box searches what you already own as you type, so a game you added
+    two years ago under a slightly different title shows up before you add it twice.
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" md="7">
+        <MudPaper Outlined="true" Class="pa-4">
+
+            <MudTextField T="string" Value="_name" ValueChanged="OnNameChanged"
+                          Immediate="true" DebounceInterval="200" Clearable="true"
+                          Label="Name" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Rounded.Search"
+                          HelperText="Searches your collection by 'contains'" />
+
+            @if (_exactMatch is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                    You already have <strong>@_exactMatch.Name</strong> — exact name match.
+                </MudAlert>
+            }
+
+            <MudText Typo="Typo.overline" Class="d-block mt-4">Hours</MudText>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
+                All three are required — they are NOT NULL on the table. The average
+                is computed by the database; never enter it.
+            </MudText>
+
+            <MudGrid>
+                <MudItem xs="4">
+                    <MudNumericField T="decimal?" @bind-Value="_main" Label="Main"
+                                     Variant="Variant.Outlined" Min="0" Step="0.5M"
+                                     HideSpinButtons="false" />
+                </MudItem>
+                <MudItem xs="4">
+                    <MudNumericField T="decimal?" @bind-Value="_extra" Label="Main + extra"
+                                     Variant="Variant.Outlined" Min="0" Step="0.5M" />
+                </MudItem>
+                <MudItem xs="4">
+                    <MudNumericField T="decimal?" @bind-Value="_completionist" Label="Completionist"
+                                     Variant="Variant.Outlined" Min="0" Step="0.5M" />
+                </MudItem>
+            </MudGrid>
+
+            @if (Ui.ShowHours && Average is not null)
+            {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    Average will be @Average.Value.ToString("0.##")h
+                </MudText>
+            }
+
+            <MudText Typo="Typo.overline" Class="d-block mt-4">Optional</MudText>
+
+            <MudSelect T="string" @bind-SelectedValues="_tags" Label="Tags" MultiSelection="true"
+                       Variant="Variant.Outlined" Class="mt-2"
+                       MultiSelectionTextFunc="@(v => string.Join(", ", v))">
+                @foreach (var tag in _allTags)
+                {
+                    <MudSelectItem T="string" Value="@tag">@tag</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField @bind-Value="_newTags" Label="New tags (comma separated)"
+                          Variant="Variant.Outlined" Class="mt-3"
+                          HelperText="Created if they do not exist; matching is case-insensitive" />
+
+            <MudTextField @bind-Value="_notes" Label="Notes" Variant="Variant.Outlined"
+                          Class="mt-3" Lines="2" />
+
+            <MudGrid Class="mt-1">
+                <MudItem xs="8">
+                    <MudTextField @bind-Value="_series" Label="Series" Variant="Variant.Outlined"
+                                  HelperText="Created if new" />
+                </MudItem>
+                <MudItem xs="4">
+                    <MudNumericField T="int?" @bind-Value="_seriesPosition" Label="Position"
+                                     Variant="Variant.Outlined" Min="1" />
+                </MudItem>
+            </MudGrid>
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">@_error</MudAlert>
+            }
+
+            <div class="d-flex gap-2 mt-4">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(!CanSave || _saving)" OnClick="SaveAsync">
+                    @(_saving ? "Adding…" : "Add game")
+                </MudButton>
+                <MudButton Variant="Variant.Text" OnClick="Reset" Disabled="_saving">Clear</MudButton>
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="5">
+        <MudPaper Outlined="true" Class="pa-4">
+            <MudText Typo="Typo.overline">
+                Already in your collection
+                @if (_hits.Count > 0) { <text>(@_hits.Count)</text> }
+            </MudText>
+
+            @if (_name.Trim().Length < 2)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">
+                    Type at least two letters.
+                </MudText>
+            }
+            else if (_hits.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">
+                    Nothing matches “@_name.Trim()”. Looks new.
+                </MudText>
+            }
+            else
+            {
+                <div class="d-flex flex-column gap-1 mt-2">
+                    @foreach (var hit in _hits)
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudText Typo="Typo.body2"
+                                     Class="@(hit.Finished ? "mud-text-disabled" : "")"
+                                     Style="@(hit.Finished ? "text-decoration:line-through" : "")">
+                                @hit.Name
+                            </MudText>
+                            <MudSpacer />
+                            @if (hit.Series is not null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                         Color="Color.Primary">
+                                    @hit.Series @hit.Position
+                                </MudChip>
+                            }
+                            @if (hit.Finished)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text">finished</MudChip>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string _name = "";
+    private decimal? _main, _extra, _completionist;
+    private string? _notes, _series, _newTags;
+    private int? _seriesPosition;
+    private IReadOnlyCollection<string> _tags = [];
+    private List<string> _allTags = [];
+    private List<PickGame> _hits = [];
+    private PickGame? _exactMatch;
+    private string? _error;
+    private bool _saving;
+
+    // Mirrors the generated column: round((main + extra + completionist) / 3, 2).
+    private decimal? Average =>
+        _main is null || _extra is null || _completionist is null
+            ? null
+            : Math.Round((_main.Value + _extra.Value + _completionist.Value) / 3m, 2);
+
+    private bool CanSave =>
+        _name.Trim().Length > 0 && _main is not null && _extra is not null && _completionist is not null;
+
+    protected override async Task OnInitializedAsync() => _allTags = await Repo.GetTagsAsync();
+
+    private async Task OnNameChanged(string value)
+    {
+        _name = value ?? "";
+        _error = null;
+
+        var q = _name.Trim();
+        if (q.Length < 2)
+        {
+            _hits = [];
+            _exactMatch = null;
+            return;
+        }
+
+        _hits = await Repo.SearchGamesAsync(q);
+        _exactMatch = _hits.FirstOrDefault(h =>
+            string.Equals(h.Name, q, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+
+        // The table's CHECK enforces this too, but with a constraint name rather
+        // than an explanation.
+        if ((_series is null) != (_seriesPosition is null))
+        {
+            _error = "Give both a series and a position, or neither.";
+            return;
+        }
+
+        var tags = _tags
+            .Concat((_newTags ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries
+                                              | StringSplitOptions.TrimEntries))
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        _saving = true;
+        try
+        {
+            var id = await Repo.AddGameAsync(
+                _name, _main!.Value, _extra!.Value, _completionist!.Value,
+                string.IsNullOrWhiteSpace(_notes) ? null : _notes,
+                priority: null,
+                tags: tags,
+                series: string.IsNullOrWhiteSpace(_series) ? null : _series,
+                seriesPosition: _seriesPosition);
+
+            Snackbar.Add($"Added {_name.Trim()} (#{id})", MudBlazor.Severity.Success);
+            Reset();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void Reset()
+    {
+        _name = "";
+        _main = _extra = _completionist = null;
+        _notes = _series = _newTags = null;
+        _seriesPosition = null;
+        _tags = [];
+        _hits = [];
+        _exactMatch = null;
+        _error = null;
+    }
+}

@@ -1,0 +1,102 @@
+# CLAUDE.md
+
+Two unrelated projects share this repo.
+
+- **`Backlog.Web`** — Blazor Server + MudBlazor UI over a personal video-game
+  backlog in Postgres. This is the project that gets worked on.
+- **`JitTest`** — two endpoints (`/problem`, `/noproblem`) demonstrating that a
+  non-`volatile` loop flag behaves differently under x86 and ARM memory models.
+  Unrelated to games. **Do not add anything to it.**
+
+## Commands
+
+```bash
+dotnet build                                    # whole solution
+dotnet run --project Backlog.Web                # http://localhost:5064
+dotnet run --project JitTest                    # http://localhost:5087
+dotnet msbuild JitTest/JitTest.csproj -t:Compile # compile only, when the app holds a file lock
+```
+
+There are no tests. Verify by running the app and checking the database.
+
+`JitTest` carries a pre-existing `NU1903` warning from `Microsoft.AspNetCore.OpenApi`.
+It predates this work — do not "fix" it as a side quest.
+
+## Database
+
+PostgreSQL 16, schema `custom`. **Host, port, database and user are in
+`CLAUDE.local.md`, which is gitignored** — this repo may go public, so no
+committed file names them. The connection string itself lives in user secrets
+under `ConnectionStrings:Games`. Never commit either, never print either.
+
+**`db/install.sql` is the source of truth for all logic.** It is idempotent;
+re-run it after any edit. `db/quick.sql` is the daily driver, `db/queries.sql`
+the long tail.
+
+The C# layer is deliberately thin: `Backlog.Web/Data/BacklogRepository.cs`
+reads `custom.v_game`, `custom.v_unit` and `custom.v_game_tiers`. **If a query
+in C# starts re-deriving something a view already computes — blocking, the
+finished roll-up, tier boundaries — that is a bug.** Put it in the view.
+
+Key objects:
+
+| Object | What |
+|---|---|
+| `v_game_unit` / `v_unit` | one row per *playable unit*; the grain everything else works at |
+| `v_game` | one row per owned game, with tags, series slot, blocking, parts |
+| `v_game_tiers` | playable units bucketed short/medium/long by `NTILE(3)` |
+| `game_roll()` | rolls for something to play; redirects to a series head |
+| `game_add()` | inserts; knows `hours_average` is generated |
+
+## Domain rules that are easy to break
+
+These were each found the hard way. Breaking one silently corrupts data or lies
+to the user.
+
+1. **The order PUT takes the complete ranked list.** The server unranks anything
+   absent. Never hand `SetOrderAsync` a filtered subset.
+2. **Reordering is disabled while a filter is active.** `IndexInZone` is an index
+   into the *rendered* list. `AllowReorder="false"` does not stop a row being
+   draggable, so the drop handler must refuse independently.
+3. **While filtered, show the real `priority`**, not the visible index.
+4. **A split game's `finished` is derived** from its parts. Setting the parent
+   sets every part; setting a part re-derives the parent.
+5. **Splitting never creates rows.** A collection you bought once stays one row
+   in `game_completion_times`; the games inside it live in `game_part`.
+6. **Blocking spans both parts and series** — `v_unit` computes it. Render
+   `blocked_by`; never re-derive it.
+7. **Tag filtering is AND**, matching `game_by_tag()` and `game_roll()`.
+8. **Finishing a ranked game freezes its priority.** The `finished = false`
+   guard in the unrank statement must stay.
+9. **`hours_average` is a generated column.** Naming it in an INSERT raises.
+
+## UI conventions
+
+**Lengths are hidden by default** (`UiState.ShowHours`). Seeing "2h" next to a
+title spoils the surprise of rolling for something. Do not add an hours figure
+to any view without checking that flag. `/sizes` also sorts by *name* while
+hidden, because a list ordered by length leaks length even with the numbers
+stripped.
+
+**Interactivity is global**, set on `<Routes>` and `<HeadOutlet>` in
+`App.razor`. Per-page `@rendermode` leaves the layout static and its buttons
+dead.
+
+**`MudDropContainer.Items` must be one stable list instance**, mutated in place.
+A freshly built list each render desynchronises its reorder bookkeeping and rows
+render jumbled.
+
+**Do not hand-write CSS.** The point of MudBlazor here is that styling comes
+from the library. The only exception is the pre-hydration block in
+`wwwroot/app.css`, which must be plain CSS because it runs before any C# does;
+its colours are duplicated from `MainLayout.Theme` on purpose.
+
+## Working style
+
+- **Verify against the real database**, not by reasoning. Use the Rider SQL MCP
+  tools. Wrap experiments in `BEGIN; … ROLLBACK;`.
+- **This is live personal data** — 236 games, hand-ranked. Never leave test rows
+  behind; delete them and confirm the counts.
+- **Check the rendered page, not just the DOM.** Three separate bugs here were
+  invisible in markup and obvious in a screenshot. jsdom has no layout or colour.
+- Synthetic `DragEvent`s do not drive MudBlazor. Use real CDP mouse drags.

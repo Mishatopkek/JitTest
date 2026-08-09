@@ -1,0 +1,1388 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Backlog</title>
+    <style>
+        :root {
+            --bg: #fbfaf8;
+            --panel: #fff;
+            --ink: #1b1a18;
+            --muted: #78736c;
+            --line: #e5e1da;
+            --accent: #9a5b2c;
+            --danger: #a33;
+            --chip: #f1ede6;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #161513;
+                --panel: #1e1d1a;
+                --ink: #ece8e1;
+                --muted: #918b82;
+                --line: #302e2a;
+                --accent: #d69a63;
+                --danger: #d97070;
+                --chip: #2a2825;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 2rem 1.25rem 4rem;
+            background: var(--bg);
+            color: var(--ink);
+            font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        main { max-width: 46rem; margin: 0 auto; }
+
+        h1 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin: 0 0 1rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: .35rem;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 1.75rem;
+        }
+
+        .tabs button {
+            padding: .4rem .75rem;
+            margin-bottom: -1px;
+            border: 1px solid transparent;
+            border-bottom-color: transparent;
+            border-radius: .35rem .35rem 0 0;
+            color: var(--muted);
+        }
+
+        .tabs button[aria-selected=true] {
+            color: var(--ink);
+            border-color: var(--line);
+            border-bottom-color: var(--bg);
+            background: var(--panel);
+        }
+
+        section { margin-bottom: 2.5rem; }
+
+        .head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: .6rem;
+        }
+
+        h2 {
+            font-size: .78rem;
+            font-weight: 600;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin: 0;
+        }
+
+        ul { list-style: none; margin: 0; padding: 0; }
+
+        li {
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+            padding: .55rem .85rem;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: .4rem;
+            margin-bottom: .35rem;
+        }
+
+        .sortable li { cursor: grab; }
+        .sortable li:active { cursor: grabbing; }
+        .sortable li.dragging { opacity: .35; }
+        li.editing { cursor: default; }
+
+        .grip { color: var(--muted); letter-spacing: -2px; user-select: none; }
+
+        .pos {
+            min-width: 1.75rem;
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* Everything after the name is pushed right; the meta block takes the
+           slack so long tag lists wrap instead of squeezing the title. */
+        .meta {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+            gap: .3rem;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .25rem;
+            padding: .05rem .45rem;
+            font-size: .75rem;
+            background: var(--chip);
+            border-radius: 1rem;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .chip .x { cursor: pointer; opacity: 0; }
+        li:hover .chip .x { opacity: .6; }
+        .chip .x:hover { opacity: 1; color: var(--danger); }
+
+        .badge {
+            padding: .05rem .45rem;
+            font-size: .75rem;
+            border: 1px solid var(--line);
+            border-radius: 1rem;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+
+        .warn {
+            padding: .05rem .45rem;
+            font-size: .75rem;
+            border-radius: 1rem;
+            background: var(--danger);
+            color: #fff;
+            white-space: nowrap;
+        }
+
+        li.blocked .name, li.done .name { color: var(--muted); }
+        li.done .name { text-decoration: line-through; }
+
+        /* The border must read against the ROW (--panel), not the page, so it
+           cannot use --line: on dark that is ~1.2:1 against the row and the box
+           vanishes. --muted is the faintest token that still reads as a
+           control. The resting tick keeps it unmistakably a checkbox. */
+        .check {
+            width: 1.05rem; height: 1.05rem;
+            flex: none;
+            display: grid; place-items: center;
+            font-size: .7rem; line-height: 1;
+            border: 1px solid var(--muted);
+            border-radius: .25rem;
+            background: transparent;
+            color: var(--line);
+            cursor: pointer;
+            transition: background .12s, border-color .12s, color .12s;
+        }
+
+        .check:hover { border-color: var(--accent); color: var(--muted); }
+
+        .check[aria-checked=true] {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--panel);
+        }
+
+        .parts {
+            margin: -.15rem 0 .5rem 2.4rem;
+            padding-left: .85rem;
+            border-left: 2px solid var(--line);
+        }
+
+        .parts li { padding: .35rem .6rem; font-size: .9rem; }
+        .parts .pos { min-width: 1.2rem; font-size: .85rem; }
+
+        /* Holds a nested part list; a <ul> may only contain <li>. */
+        li.wrap {
+            display: block;
+            padding: 0;
+            margin: 0;
+            border: 0;
+            background: none;
+            cursor: default;
+        }
+
+        li.pick { cursor: pointer; }
+        li.pick:hover { border-color: var(--accent); }
+        li.current { border-color: var(--accent); }
+
+        button {
+            font: inherit;
+            color: var(--muted);
+            background: none;
+            border: 1px solid transparent;
+            border-radius: .3rem;
+            padding: .1rem .45rem;
+            cursor: pointer;
+        }
+
+        button:hover { color: var(--ink); border-color: var(--line); }
+        .rm:hover { color: var(--danger); }
+        .add { font-size: 1.1rem; line-height: 1; }
+        .danger { color: var(--danger); font-size: .8rem; }
+
+        .tag { font-size: .75rem; opacity: 0; }
+        li:hover .tag, li.editing .tag { opacity: 1; }
+
+        .tagbox {
+            font: inherit;
+            font-size: .8rem;
+            width: 8rem;
+            padding: .1rem .4rem;
+            color: var(--ink);
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            border-radius: 1rem;
+        }
+
+        input[type=search], input[type=text] {
+            font: inherit;
+            width: 14rem;
+            max-width: 55%;
+            padding: .35rem .6rem;
+            color: var(--ink);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: .3rem;
+        }
+
+        .empty { color: var(--muted); font-style: italic; padding: .6rem .1rem; }
+        .note { color: var(--muted); font-size: .78rem; margin: .5rem 0 0; }
+
+        .tagbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .35rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .tagbar .label {
+            font-size: .72rem;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-right: .25rem;
+        }
+
+        .tagchip {
+            padding: .15rem .6rem;
+            font-size: .8rem;
+            color: var(--muted);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 1rem;
+            cursor: pointer;
+        }
+
+        .tagchip:hover { color: var(--ink); border-color: var(--muted); }
+
+        .tagchip[aria-pressed=true] {
+            color: var(--panel);
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .tagchip .n { opacity: .65; font-variant-numeric: tabular-nums; }
+
+        .filtered {
+            padding: .4rem .7rem;
+            margin-bottom: .5rem;
+            font-size: .78rem;
+            color: var(--muted);
+            background: var(--chip);
+            border-radius: .3rem;
+        }
+
+        #status {
+            position: fixed;
+            left: 50%;
+            bottom: 1.25rem;
+            transform: translateX(-50%);
+            padding: .5rem 1rem;
+            border-radius: .35rem;
+            background: var(--ink);
+            color: var(--bg);
+            font-size: .85rem;
+            opacity: 0;
+            transition: opacity .18s;
+            pointer-events: none;
+        }
+
+        #status.show { opacity: 1; }
+        #status.err { background: var(--danger); color: #fff; }
+
+        /* --- split editor --- */
+
+        dialog {
+            width: min(34rem, calc(100vw - 2rem));
+            padding: 0;
+            color: var(--ink);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: .5rem;
+        }
+
+        dialog::backdrop { background: rgba(0, 0, 0, .45); }
+
+        .dlg-head { padding: 1.1rem 1.25rem .5rem; }
+        .dlg-head h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+        .dlg-head p { margin: .35rem 0 0; font-size: .8rem; color: var(--muted); }
+
+        .dlg-body { padding: .5rem 1.25rem; max-height: min(26rem, 55vh); overflow-y: auto; }
+
+        .dlg-foot {
+            display: flex;
+            justify-content: flex-end;
+            gap: .5rem;
+            padding: .75rem 1.25rem 1.1rem;
+        }
+
+        .dlg-foot .spacer { margin-right: auto; }
+
+        .dlg-foot button {
+            padding: .35rem .85rem;
+            border: 1px solid var(--line);
+            border-radius: .3rem;
+        }
+
+        .dlg-foot .primary {
+            color: var(--bg);
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .dlg-foot .primary:hover { color: var(--bg); opacity: .9; }
+
+        #splitRows li { gap: .5rem; }
+        #splitRows li.dragging { opacity: .35; }
+
+        #splitRows input {
+            font: inherit;
+            flex: 1;
+            min-width: 0;
+            padding: .25rem .5rem;
+            color: var(--ink);
+            background: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: .3rem;
+        }
+
+        #splitRows input:focus { outline: none; border-color: var(--accent); }
+
+        .keeps {
+            font-size: .7rem;
+            padding: .05rem .4rem;
+            border-radius: 1rem;
+            background: var(--accent);
+            color: var(--bg);
+            white-space: nowrap;
+        }
+
+        .addrow {
+            margin-top: .35rem;
+            padding: .35rem .6rem;
+            font-size: .85rem;
+            border: 1px dashed var(--line);
+            border-radius: .3rem;
+            width: 100%;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Backlog</h1>
+
+    <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="order" aria-selected="true">Play order</button>
+        <button role="tab" data-tab="series" aria-selected="false">Series</button>
+    </nav>
+
+    <div id="tab-order">
+        <div class="tagbar" id="tagBar"></div>
+
+        <section>
+            <div class="head">
+                <h2>Ranked <span id="rankedCount"></span></h2>
+                <span class="note" id="rankedHint">drag to reorder</span>
+            </div>
+            <p class="filtered" id="rankedFiltered" hidden></p>
+            <ul id="ranked" class="sortable"></ul>
+            <p class="empty" id="rankedEmpty" hidden>Nothing ranked yet. Add one from below.</p>
+        </section>
+
+        <section>
+            <div class="head">
+                <h2>Unranked <span id="unrankedCount"></span></h2>
+                <input type="search" id="filter" placeholder="name, tag or series" autocomplete="off">
+            </div>
+            <ul id="unranked"></ul>
+            <p class="note">
+                A game marked <span class="warn">after …</span> has an unfinished game
+                ahead of it in its series, so the roll will skip it. Tick the box to
+                mark something finished. <strong>split</strong> turns a collection you
+                own — Mass Effect Legendary Edition, an Ace Attorney trilogy — into the
+                games inside it, without inventing rows for games you did not buy
+                separately. Click a split title to show its parts.
+            </p>
+        </section>
+
+        <section>
+            <div class="head">
+                <h2>Finished <span id="doneCount"></span></h2>
+                <span class="note">untick to put one back</span>
+            </div>
+            <ul id="done"></ul>
+            <p class="empty" id="doneEmpty" hidden>Nothing finished yet.</p>
+        </section>
+    </div>
+
+    <div id="tab-series" hidden>
+        <section>
+            <div class="head">
+                <h2>Series <span id="seriesCount"></span></h2>
+                <input type="text" id="newSeries" placeholder="new series name, then Enter" autocomplete="off">
+            </div>
+            <ul id="seriesList"></ul>
+            <p class="empty" id="seriesEmpty" hidden>No series yet. Name one above.</p>
+        </section>
+
+        <section id="seriesDetail" hidden>
+            <div class="head">
+                <h2 id="seriesTitle"></h2>
+                <span class="note">drag to set play order</span>
+            </div>
+            <ul id="seriesGames" class="sortable"></ul>
+            <p class="empty" id="seriesGamesEmpty" hidden>No games in this series yet. Add one below.</p>
+            <p class="note">
+                Position 1 is played first. A game only becomes available once every
+                entry above it is finished, so a struck-through title here is what
+                unblocks the next one.
+            </p>
+
+            <div class="head" style="margin-top:1.5rem">
+                <h2>Add a game</h2>
+                <input type="search" id="gamePick" placeholder="search every game" autocomplete="off">
+            </div>
+            <ul id="gamePickList"></ul>
+            <p class="empty" id="gamePickHint">Type at least two letters.</p>
+
+            <p class="note" style="margin-top:1.5rem">
+                <button class="danger" id="deleteSeries">delete this series</button>
+                Its games are released, not deleted.
+            </p>
+        </section>
+    </div>
+</main>
+
+<datalist id="tagOptions"></datalist>
+
+<dialog id="splitDialog">
+    <div class="dlg-head">
+        <h3 id="splitTitle"></h3>
+        <p>
+            The games inside this one purchase, in play order. The row itself stays
+            a single game — this never adds games you did not buy.
+        </p>
+    </div>
+    <div class="dlg-body">
+        <ul id="splitRows" class="sortable"></ul>
+        <button class="addrow" id="splitAdd">+ add a game</button>
+    </div>
+    <div class="dlg-foot">
+        <button class="spacer danger" id="splitClear">undo split</button>
+        <button id="splitCancel">Cancel</button>
+        <button class="primary" id="splitSave">Save</button>
+    </div>
+</dialog>
+
+<div id="status"></div>
+
+<script>
+    const $ = id => document.getElementById(id);
+
+    const rankedEl = $('ranked');
+    const unrankedEl = $('unranked');
+    const doneEl = $('done');
+    const filterEl = $('filter');
+    const statusEl = $('status');
+    const tagOptionsEl = $('tagOptions');
+    const seriesListEl = $('seriesList');
+    const seriesGamesEl = $('seriesGames');
+    const gamePickEl = $('gamePick');
+    const gamePickListEl = $('gamePickList');
+
+    let ranked = [];
+    let unranked = [];
+    let done = [];
+    let allTags = [];
+    let activeTags = new Set();  // lowercased tag names, ANDed together
+    let openParts = new Set();   // game ids whose part list is expanded
+    let partsCache = {};         // gameId -> parts, refreshed on every load
+    let seriesList = [];
+    let allGames = [];
+    let currentSeriesId = null;
+
+    function say(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.classList.toggle('err', isError);
+        statusEl.classList.add('show');
+        clearTimeout(say.timer);
+        say.timer = setTimeout(() => statusEl.classList.remove('show'), 1800);
+    }
+
+    async function load() {
+        const [games, tags, series, all] = await Promise.all([
+            fetch('/api/games'), fetch('/api/tags'), fetch('/api/series'), fetch('/api/games/all')
+        ]);
+        if (!games.ok) return say('Could not load games', true);
+
+        ({ ranked, unranked, done } = await games.json());
+        allTags = tags.ok ? await tags.json() : [];
+        seriesList = series.ok ? await series.json() : [];
+        allGames = all.ok ? await all.json() : [];
+
+        // Parts are fetched per game, so refresh only the ones on screen.
+        partsCache = {};
+        await Promise.all([...openParts].map(loadParts));
+
+        tagOptionsEl.replaceChildren(...allTags.map(t => {
+            const option = document.createElement('option');
+            option.value = t;
+            return option;
+        }));
+
+        if (!seriesList.some(s => s.id === currentSeriesId)) currentSeriesId = null;
+
+        render();
+        renderSeries();
+    }
+
+    // --- play order ----------------------------------------------------------
+
+    // The server takes the whole ranked list and derives everything from it:
+    // absent ids become unranked, present ids are renumbered 1..n. So every
+    // mutation here is just "reorder the array locally, then send it".
+    async function save() {
+        const response = await fetch('/api/games/order', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ranked.map(g => g.id))
+        });
+        if (response.ok) say('Saved');
+        else { say('Save failed', true); await load(); }
+    }
+
+    async function addTag(game, tag) {
+        tag = tag.trim();
+        if (!tag || game.tags.some(t => t.toLowerCase() === tag.toLowerCase())) return;
+
+        const response = await fetch(`/api/games/${game.id}/tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag })
+        });
+        if (!response.ok) { say('Could not add tag', true); return; }
+
+        // The server owns the canonical casing: an existing "PC" wins over a
+        // freshly typed "pc". Reloading is how we find out which we got.
+        await load();
+        say(`Tagged ${tag}`);
+    }
+
+    // --- finished, and splitting ---------------------------------------------
+
+    async function loadParts(gameId) {
+        const response = await fetch(`/api/games/${gameId}/parts`);
+        if (response.ok) partsCache[gameId] = await response.json();
+    }
+
+    async function setFinished(kind, id, finished) {
+        const response = await fetch(`/api/${kind}/${id}/finished`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ finished })
+        });
+        if (!response.ok) { say('Could not save', true); return; }
+
+        // Finishing one thing can unblock another anywhere in the series, so
+        // reload rather than patching the local copy.
+        await load();
+        render();
+        say(finished ? 'Finished' : 'Reopened');
+    }
+
+    // Splitting keeps the collection as ONE owned row and hangs the games it
+    // contains off it. It never invents rows, so the table still says exactly
+    // what you bought.
+    const splitDialog = $('splitDialog');
+    const splitRowsEl = $('splitRows');
+    let splitGame = null;
+
+    // One editable row per game inside the collection. The DOM is the source of
+    // truth for order -- dragging just moves nodes, and save reads them in
+    // document order, so there is no array to keep in sync.
+    function splitRow(name = '', finished = false) {
+        const li = document.createElement('li');
+        li.draggable = true;
+        li.dataset.id = String(splitRow.seq = (splitRow.seq ?? 0) + 1);
+
+        const grip = document.createElement('span');
+        grip.className = 'grip';
+        grip.textContent = '⠿';
+
+        const input = document.createElement('input');
+        input.value = name;
+        input.placeholder = 'game name';
+        input.autocomplete = 'off';
+        // Typing in an input inside a draggable <li> fights the drag, so the row
+        // stops being draggable while the caret is in it.
+        input.onfocus = () => { li.draggable = false; };
+        input.onblur = () => { li.draggable = true; };
+        input.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); addSplitRow(li); }
+            else if (e.key === 'Backspace' && input.value === '' && splitRowsEl.children.length > 1) {
+                e.preventDefault();
+                const focusAfter = li.previousElementSibling ?? li.nextElementSibling;
+                li.remove();
+                focusAfter?.querySelector('input')?.focus();
+            }
+        };
+
+        const box = document.createElement('span');
+        if (finished) {
+            const chip = document.createElement('span');
+            chip.className = 'keeps';
+            chip.textContent = 'finished';
+            chip.title = 'Keeps its finished mark as long as the name stays the same';
+            box.append(chip);
+        }
+
+        const rm = document.createElement('button');
+        rm.className = 'rm';
+        rm.type = 'button';
+        rm.title = 'Remove';
+        rm.textContent = '✕';
+        rm.onclick = () => li.remove();
+
+        li.append(grip, input, box, rm);
+        return li;
+    }
+
+    function addSplitRow(after = null) {
+        const li = splitRow();
+        if (after) after.after(li); else splitRowsEl.append(li);
+        li.querySelector('input').focus();
+    }
+
+    async function editSplit(game) {
+        // Parts are cached lazily, only for expanded rows. Without this fetch,
+        // editing a collapsed split opened an EMPTY editor, and saving read as
+        // "no parts" and silently wiped the split.
+        // showModal() throws InvalidStateError on an already-open dialog, and
+        // the await above leaves a window for a second click to get here.
+        if (splitDialog.open) return;
+
+        if (game.parts && !partsCache[game.id]) await loadParts(game.id);
+        if (splitDialog.open) return;
+
+        splitGame = game;
+        const existing = partsCache[game.id] ?? [];
+
+        $('splitTitle').textContent = game.name;
+        $('splitClear').hidden = existing.length === 0;
+
+        splitRowsEl.replaceChildren(
+            ...(existing.length
+                ? existing.map(p => splitRow(p.name, p.finished))
+                : [splitRow(), splitRow()]));
+
+        splitDialog.showModal();
+        splitRowsEl.querySelector('input')?.focus();
+    }
+
+    async function saveSplit(names) {
+        const response = await fetch(`/api/games/${splitGame.id}/parts`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(names)
+        });
+        if (!response.ok) { say('Could not save the split', true); return; }
+
+        if (names.length) openParts.add(splitGame.id); else openParts.delete(splitGame.id);
+        splitDialog.close();
+        await load();
+        render();
+        say(names.length ? `Split into ${names.length}` : 'Split undone');
+    }
+
+    $('splitAdd').onclick = () => addSplitRow();
+    $('splitCancel').onclick = () => splitDialog.close();
+
+    $('splitSave').onclick = () => {
+        const names = [...splitRowsEl.querySelectorAll('input')]
+            .map(i => i.value.trim())
+            .filter(Boolean);
+
+        if (names.length === 1) { say('A split needs at least two games', true); return; }
+        if (names.length === 0) { $('splitClear').click(); return; }
+
+        const seen = new Set(names.map(n => n.toLowerCase()));
+        if (seen.size !== names.length) { say('Two rows have the same name', true); return; }
+
+        saveSplit(names);
+    };
+
+    // Undoing throws away per-part progress, so say what it costs first.
+    $('splitClear').onclick = () => {
+        const existing = partsCache[splitGame.id] ?? [];
+        if (!existing.length) { splitDialog.close(); return; }
+
+        const played = existing.filter(p => p.finished).length;
+        const cost = played ? ` You will lose the finished mark on ${played}.` : '';
+        if (!confirm(`Undo the split of "${splitGame.name}" and drop its ${existing.length} parts?${cost}`)) return;
+
+        saveSplit([]);
+    };
+
+    makeSortable(splitRowsEl, () => { /* order is read from the DOM on save */ });
+
+    function partRows(game) {
+        const parts = partsCache[game.id] ?? [];
+        const list = document.createElement('ul');
+        list.className = 'parts';
+
+        list.replaceChildren(...parts.map(part => {
+            const li = document.createElement('li');
+            if (part.finished) li.classList.add('done');
+            if (part.blockedBy) li.classList.add('blocked');
+
+            const check = document.createElement('span');
+            check.className = 'check';
+            check.setAttribute('role', 'checkbox');
+            check.setAttribute('aria-checked', String(part.finished));
+            check.textContent = '✓';
+            check.title = part.finished ? 'Mark unplayed' : 'Mark finished';
+            check.onclick = () => setFinished('parts', part.id, !part.finished);
+
+            const pos = document.createElement('span');
+            pos.className = 'pos';
+            pos.textContent = part.position;
+
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = part.name;
+
+            const box = document.createElement('span');
+            box.className = 'meta';
+            if (part.blockedBy) {
+                const warn = document.createElement('span');
+                warn.className = 'warn';
+                warn.textContent = `after ${part.blockedBy}`;
+                box.append(warn);
+            }
+            if (part.hours != null) {
+                const chip = document.createElement('span');
+                chip.className = 'chip';
+                chip.textContent = `${(+part.hours).toFixed(0)}h`;
+                box.append(chip);
+            }
+
+            li.append(check, pos, name, box);
+            return li;
+        }));
+
+        return list;
+    }
+
+    async function removeTag(game, tag) {
+        const response = await fetch(
+            `/api/games/${game.id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
+        if (!response.ok) { say('Could not remove tag', true); return; }
+
+        game.tags = game.tags.filter(t => t !== tag);
+        render();
+    }
+
+    function meta(game, li) {
+        const box = document.createElement('span');
+        box.className = 'meta';
+
+        if (game.blockedBy) {
+            const warn = document.createElement('span');
+            warn.className = 'warn';
+            warn.textContent = `after ${game.blockedBy}`;
+            warn.title = 'An earlier game in this series is still unfinished.';
+            box.append(warn);
+            li.classList.add('blocked');
+        }
+
+        if (game.series) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = game.seriesTotal
+                ? `${game.series} ${game.seriesPosition}/${game.seriesTotal}`
+                : `${game.series} #${game.seriesPosition}`;
+            box.append(badge);
+        }
+
+        if (game.parts) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = `${game.partsFinished}/${game.parts} played`;
+            badge.title = game.nextUp ? `Next: ${game.nextUp}` : 'All parts finished';
+            box.append(badge);
+        }
+
+        for (const tag of game.tags) {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.append(tag);
+
+            const x = document.createElement('span');
+            x.className = 'x';
+            x.textContent = '×';
+            x.title = `Remove ${tag}`;
+            x.onclick = e => { e.stopPropagation(); removeTag(game, tag); };
+            chip.append(x);
+
+            box.append(chip);
+        }
+
+        const tagButton = document.createElement('button');
+        tagButton.className = 'tag';
+        tagButton.title = 'Add a tag';
+        tagButton.textContent = '+tag';
+        tagButton.onclick = () => editTag(li, game, tagButton);
+        box.append(tagButton);
+
+        const splitButton = document.createElement('button');
+        splitButton.className = 'tag';
+        splitButton.title = game.parts
+            ? 'Edit the games inside this collection'
+            : 'Split this collection into the games inside it';
+        splitButton.textContent = game.parts ? 'edit split' : 'split';
+        splitButton.onclick = () => editSplit(game);
+        box.append(splitButton);
+
+        return box;
+    }
+
+    // A text input inside a draggable <li> is a fight over the mousedown, so
+    // the row stops being draggable while the input is open.
+    function editTag(li, game, tagButton) {
+        const input = document.createElement('input');
+        input.className = 'tagbox';
+        input.setAttribute('list', 'tagOptions');
+        input.placeholder = 'tag';
+
+        const close = () => {
+            input.replaceWith(tagButton);
+            li.draggable = li.parentElement === rankedEl;
+            li.classList.remove('editing');
+        };
+
+        input.onkeydown = e => {
+            if (e.key === 'Enter') { addTag(game, input.value); close(); }
+            else if (e.key === 'Escape') close();
+        };
+        input.onblur = close;
+
+        li.draggable = false;
+        li.classList.add('editing');
+        tagButton.replaceWith(input);
+        input.focus();
+    }
+
+    function row(game, position, draggable = true) {
+        const li = document.createElement('li');
+        li.dataset.id = game.id;
+        if (game.finished) li.classList.add('done');
+
+        if (position === null) {
+            // A finished game gets no "+": ranking something you have played is
+            // not a thing you meant to do. Un-finish it first.
+            const add = document.createElement('button');
+            add.className = 'add';
+            add.title = 'Add to ranked';
+            add.textContent = '+';
+            add.onclick = () => rank(game.id);
+            add.disabled = game.finished;
+            add.style.visibility = game.finished ? 'hidden' : '';
+            li.append(add);
+        } else {
+            li.draggable = draggable;
+            const grip = document.createElement('span');
+            grip.className = 'grip';
+            grip.textContent = '⠿';
+            if (!draggable) grip.style.opacity = '.25';
+            const pos = document.createElement('span');
+            pos.className = 'pos';
+            pos.textContent = position;
+            li.append(grip, pos);
+        }
+
+        const check = document.createElement('span');
+        check.className = 'check';
+        check.setAttribute('role', 'checkbox');
+        check.setAttribute('aria-checked', String(game.finished));
+        check.textContent = '✓';
+        check.title = game.parts
+            ? (game.finished ? 'Mark every part unplayed' : 'Mark every part finished')
+            : (game.finished ? 'Mark unplayed' : 'Mark finished');
+        check.onclick = () => setFinished('games', game.id, !game.finished);
+        li.append(check);
+
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = game.name;
+
+        // A split collection's title toggles its part list rather than being
+        // inert -- that list is where the real finished state lives.
+        if (game.parts) {
+            name.style.cursor = 'pointer';
+            name.title = 'Show the games inside';
+            name.onclick = () => {
+                if (openParts.has(game.id)) openParts.delete(game.id);
+                else { openParts.add(game.id); loadParts(game.id).then(render); }
+                render();
+            };
+        }
+
+        li.append(name, meta(game, li));
+
+        if (position !== null) {
+            const rm = document.createElement('button');
+            rm.className = 'rm';
+            rm.title = 'Unrank';
+            rm.textContent = '✕';
+            rm.onclick = () => unrank(game.id);
+            li.append(rm);
+        }
+
+        return li;
+    }
+
+    // A split game renders as its row plus, when expanded, its parts. The part
+    // list is wrapped in a bare <li> because a <ul> may only contain <li>, and
+    // that wrapper carries no data-id so the drag handlers skip it.
+    function rowGroup(game, position, draggable = true) {
+        const li = row(game, position, draggable);
+        if (!game.parts || !openParts.has(game.id)) return [li];
+
+        const wrap = document.createElement('li');
+        wrap.className = 'wrap';
+        wrap.append(partRows(game));
+        return [li, wrap];
+    }
+
+    // Tag chips are AND, matching game_by_tag() and game_roll() -- picking
+    // PC + co-op means both, not either.
+    function hasAllTags(game) {
+        if (!activeTags.size) return true;
+        const own = new Set(game.tags.map(t => t.toLowerCase()));
+        return [...activeTags].every(t => own.has(t));
+    }
+
+    function matchesText(game, needle) {
+        if (!needle) return true;
+        return game.name.toLowerCase().includes(needle)
+            || game.tags.some(t => t.toLowerCase().includes(needle))
+            || (game.series ?? '').toLowerCase().includes(needle);
+    }
+
+    const needle = () => filterEl.value.trim().toLowerCase();
+    const filtering = () => activeTags.size > 0 || needle().length > 0;
+    const passes = game => hasAllTags(game) && matchesText(game, needle());
+
+    function renderTagBar() {
+        const all = [...ranked, ...unranked, ...done];
+        const bar = $('tagBar');
+
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = 'Tags';
+
+        const chips = allTags.map(tag => {
+            const key = tag.toLowerCase();
+            const on = activeTags.has(key);
+
+            // Count what picking this chip would actually leave, so a chip that
+            // narrows to nothing says so before you click it.
+            const would = new Set([...activeTags, key]);
+            const n = all.filter(g => {
+                const own = new Set(g.tags.map(t => t.toLowerCase()));
+                return [...(on ? activeTags : would)].every(t => own.has(t));
+            }).length;
+
+            const chip = document.createElement('button');
+            chip.className = 'tagchip';
+            chip.setAttribute('aria-pressed', String(on));
+            chip.append(tag);
+
+            const count = document.createElement('span');
+            count.className = 'n';
+            count.textContent = ` ${n}`;
+            chip.append(count);
+
+            chip.onclick = () => {
+                if (on) activeTags.delete(key); else activeTags.add(key);
+                render();
+            };
+            return chip;
+        });
+
+        const clear = document.createElement('button');
+        clear.className = 'tagchip';
+        clear.textContent = 'clear';
+        clear.hidden = activeTags.size === 0;
+        clear.onclick = () => { activeTags.clear(); render(); };
+
+        bar.replaceChildren(label, ...chips, clear);
+    }
+
+    function render() {
+        $('rankedCount').textContent = ranked.length ? `(${ranked.length})` : '';
+        $('unrankedCount').textContent = `(${unranked.length})`;
+        $('rankedEmpty').hidden = ranked.length > 0;
+
+        renderTagBar();
+
+        // Dragging is off while a filter is on. dragend rebuilds the order from
+        // the rows present in the DOM, so reordering a partial list would
+        // unrank everything the filter is hiding. The number shown is the
+        // game's real priority rather than its position in the visible subset,
+        // which would otherwise read 1, 2, 3 for games ranked 7, 40, 155.
+        const on = filtering();
+        const shownRanked = on ? ranked.filter(passes) : ranked;
+
+        rankedEl.replaceChildren(...shownRanked.flatMap((game, i) =>
+            rowGroup(game, on ? (game.priority ?? i + 1) : i + 1, !on)));
+
+        $('rankedHint').textContent = on ? '' : 'drag to reorder';
+        $('rankedFiltered').hidden = !on;
+        $('rankedFiltered').textContent =
+            `Showing ${shownRanked.length} of ${ranked.length} ranked. ` +
+            `Dragging is off while filtered — clear the filter to reorder.`;
+
+        const shownUnranked = unranked.filter(passes);
+        unrankedEl.replaceChildren(...shownUnranked.flatMap(game => rowGroup(game, null)));
+
+        const shownDone = done.filter(passes);
+        $('doneCount').textContent = done.length ? `(${done.length})` : '';
+        doneEl.replaceChildren(...shownDone.flatMap(game => rowGroup(game, null)));
+        $('doneEmpty').hidden = done.length > 0;
+    }
+
+    function rank(id) {
+        const i = unranked.findIndex(g => g.id === id);
+        if (i < 0) return;
+        ranked.push(unranked.splice(i, 1)[0]);
+        render();
+        save();
+    }
+
+    function unrank(id) {
+        const i = ranked.findIndex(g => g.id === id);
+        if (i < 0) return;
+        unranked.push(ranked.splice(i, 1)[0]);
+        unranked.sort((a, b) => a.name.localeCompare(b.name));
+        render();
+        save();
+    }
+
+    // --- series --------------------------------------------------------------
+
+    const currentSeries = () => seriesList.find(s => s.id === currentSeriesId) ?? null;
+
+    // Same contract as the ranking: the client sends the complete membership in
+    // order, the server detaches whatever is missing and renumbers the rest
+    // 1..n. Adding, reordering and removing are all this one call.
+    async function saveSeries() {
+        const series = currentSeries();
+        if (!series) return;
+
+        const response = await fetch(`/api/series/${series.id}/order`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(series.games.map(g => g.id))
+        });
+        if (!response.ok) { say('Save failed', true); }
+        else { say('Saved'); }
+
+        // Always reload: a game moved in from another series has to disappear
+        // from that one, and every blockedBy on the order tab may have shifted.
+        await load();
+    }
+
+    async function createSeries(name) {
+        name = name.trim();
+        if (!name) return;
+
+        const response = await fetch('/api/series', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        if (!response.ok) { say('Could not create series', true); return; }
+
+        const series = await response.json();
+        currentSeriesId = series.id;
+        $('newSeries').value = '';
+        await load();
+        say(`Series "${series.name}"`);
+    }
+
+    async function deleteSeries() {
+        const series = currentSeries();
+        if (!series) return;
+
+        const response = await fetch(`/api/series/${series.id}`, { method: 'DELETE' });
+        if (!response.ok) { say('Could not delete series', true); return; }
+
+        currentSeriesId = null;
+        await load();
+        say('Series deleted');
+    }
+
+    function removeFromSeries(id) {
+        const series = currentSeries();
+        if (!series) return;
+        series.games = series.games.filter(g => g.id !== id);
+        renderSeries();
+        saveSeries();
+    }
+
+    function addToSeries(id) {
+        const series = currentSeries();
+        if (!series || series.games.some(g => g.id === id)) return;
+
+        const game = allGames.find(g => g.id === id);
+        if (!game) return;
+
+        series.games.push({ id, name: game.name, position: series.games.length + 1, finished: game.finished });
+        gamePickEl.value = '';
+        renderSeries();
+        saveSeries();
+    }
+
+    function renderSeries() {
+        $('seriesCount').textContent = seriesList.length ? `(${seriesList.length})` : '';
+        $('seriesEmpty').hidden = seriesList.length > 0;
+
+        seriesListEl.replaceChildren(...seriesList.map(series => {
+            const li = document.createElement('li');
+            li.className = 'pick';
+            if (series.id === currentSeriesId) li.classList.add('current');
+            li.onclick = () => { currentSeriesId = series.id; renderSeries(); };
+
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = series.name;
+
+            const box = document.createElement('span');
+            box.className = 'meta';
+            const badge = document.createElement('span');
+            badge.className = 'chip';
+            const done = series.games.filter(g => g.finished).length;
+            badge.textContent = `${series.games.length} games, ${done} finished`;
+            box.append(badge);
+
+            li.append(name, box);
+            return li;
+        }));
+
+        const series = currentSeries();
+        $('seriesDetail').hidden = series === null;
+        if (!series) return;
+
+        $('seriesTitle').textContent = series.name;
+        $('seriesGamesEmpty').hidden = series.games.length > 0;
+
+        seriesGamesEl.replaceChildren(...series.games.map((game, i) => {
+            const li = document.createElement('li');
+            li.dataset.id = game.id;
+            li.draggable = true;
+            if (game.finished) li.classList.add('done');
+
+            const grip = document.createElement('span');
+            grip.className = 'grip';
+            grip.textContent = '⠿';
+
+            const pos = document.createElement('span');
+            pos.className = 'pos';
+            pos.textContent = i + 1;
+
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = game.name;
+
+            const box = document.createElement('span');
+            box.className = 'meta';
+            if (game.finished) {
+                const badge = document.createElement('span');
+                badge.className = 'chip';
+                badge.textContent = 'finished';
+                box.append(badge);
+            }
+
+            const rm = document.createElement('button');
+            rm.className = 'rm';
+            rm.title = 'Remove from series';
+            rm.textContent = '✕';
+            rm.onclick = () => removeFromSeries(game.id);
+
+            li.append(grip, pos, name, box, rm);
+            return li;
+        }));
+
+        renderPicker();
+    }
+
+    // Deliberately requires two characters and caps the list: this searches all
+    // 176 games including finished ones, and an unfiltered dump of that under
+    // the series you are editing is noise, not help.
+    function renderPicker() {
+        const series = currentSeries();
+        const needle = gamePickEl.value.trim().toLowerCase();
+
+        if (!series || needle.length < 2) {
+            gamePickListEl.replaceChildren();
+            $('gamePickHint').hidden = false;
+            $('gamePickHint').textContent = 'Type at least two letters.';
+            return;
+        }
+
+        const inSeries = new Set(series.games.map(g => g.id));
+        const hits = allGames
+            .filter(g => !inSeries.has(g.id) && g.name.toLowerCase().includes(needle))
+            .slice(0, 12);
+
+        $('gamePickHint').hidden = hits.length > 0;
+        $('gamePickHint').textContent = 'Nothing matches.';
+
+        gamePickListEl.replaceChildren(...hits.map(game => {
+            const li = document.createElement('li');
+            li.className = 'pick';
+            if (game.finished) li.classList.add('done');
+            li.onclick = () => addToSeries(game.id);
+
+            const add = document.createElement('span');
+            add.className = 'add';
+            add.textContent = '+';
+
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = game.name;
+
+            const box = document.createElement('span');
+            box.className = 'meta';
+
+            // Adding this game moves it out of whatever series it is in now.
+            // Say so before the click, not after.
+            if (game.series) {
+                const badge = document.createElement('span');
+                badge.className = 'warn';
+                badge.textContent = `moves out of ${game.series}`;
+                box.append(badge);
+            }
+            if (game.finished) {
+                const badge = document.createElement('span');
+                badge.className = 'chip';
+                badge.textContent = 'finished';
+                box.append(badge);
+            }
+
+            li.append(add, name, box);
+            return li;
+        }));
+    }
+
+    // --- shared drag-and-drop ------------------------------------------------
+
+    // Drag state lives in the DOM during the drag and is read back on drop.
+    // Reordering the array mid-drag would re-render and destroy the element
+    // the browser is currently dragging.
+    function makeSortable(listEl, onReorder) {
+        let dragging = null;
+
+        listEl.addEventListener('dragstart', e => {
+            dragging = e.target.closest('li[data-id]');
+            if (!dragging || dragging.parentElement !== listEl) { dragging = null; return; }
+            dragging.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        listEl.addEventListener('dragover', e => {
+            if (!dragging) return;
+            e.preventDefault();
+            // :scope > so an expanded part list never becomes a drop target.
+            const after = [...listEl.querySelectorAll(':scope > li:not(.dragging)')].find(li => {
+                const box = li.getBoundingClientRect();
+                return e.clientY < box.top + box.height / 2;
+            });
+            listEl.insertBefore(dragging, after ?? null);
+        });
+
+        listEl.addEventListener('dragend', () => {
+            if (!dragging) return;
+            dragging.classList.remove('dragging');
+            dragging = null;
+            // Only real rows carry data-id; part-list wrappers are skipped.
+            onReorder([...listEl.querySelectorAll(':scope > li[data-id]')].map(li => +li.dataset.id));
+        });
+    }
+
+    makeSortable(rankedEl, order => {
+        // Belt and braces. Rows are already non-draggable while filtered, but a
+        // save here would PUT only the visible ids and unrank everything else,
+        // so refuse outright rather than trust the flag.
+        if (filtering()) { render(); return; }
+        ranked.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+        render();
+        save();
+    });
+
+    makeSortable(seriesGamesEl, order => {
+        const series = currentSeries();
+        if (!series) return;
+        series.games.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+        renderSeries();
+        saveSeries();
+    });
+
+    // --- wiring --------------------------------------------------------------
+
+    for (const tab of document.querySelectorAll('.tabs button')) {
+        tab.onclick = () => {
+            for (const other of document.querySelectorAll('.tabs button')) {
+                const on = other === tab;
+                other.setAttribute('aria-selected', on);
+                $(`tab-${other.dataset.tab}`).hidden = !on;
+            }
+        };
+    }
+
+    filterEl.addEventListener('input', render);
+    gamePickEl.addEventListener('input', renderPicker);
+    $('newSeries').addEventListener('keydown', e => {
+        if (e.key === 'Enter') createSeries(e.target.value);
+    });
+    $('deleteSeries').onclick = deleteSeries;
+
+    load();
+</script>
+</body>
+</html>

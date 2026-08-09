@@ -1,0 +1,253 @@
+@page "/series"
+@rendermode InteractiveServer
+@inject BacklogRepository Repo
+@inject ISnackbar Snackbar
+
+<PageTitle>Series</PageTitle>
+
+@if (_series is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex align-center gap-3 mb-3">
+        <MudText Typo="Typo.overline">Series (@_series.Count)</MudText>
+        <MudSpacer />
+        <MudTextField @bind-Value="_newName" Placeholder="new series name, then Enter"
+                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                      OnKeyDown="OnNewKey" Style="max-width:22rem" />
+    </div>
+
+    @if (_series.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">No series yet. Name one above.</MudText>
+    }
+
+    <div class="d-flex flex-column gap-1 mb-6">
+        @foreach (var s in _series)
+        {
+            <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-2"
+                      Style="@(s.Id == _selectedId ? "border-color:var(--mud-palette-primary);cursor:pointer" : "cursor:pointer")"
+                      @onclick="@(() => Select(s.Id))">
+                <MudText Typo="Typo.body1">@s.Name</MudText>
+                <MudSpacer />
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                    @s.Games.Count games, @s.Games.Count(g => g.Finished) finished
+                </MudChip>
+            </MudPaper>
+        }
+    </div>
+
+    @if (Selected is not null)
+    {
+        <MudDivider Class="mb-4" />
+
+        <div class="d-flex align-center mb-2">
+            <MudText Typo="Typo.h6">@Selected.Name</MudText>
+            <MudSpacer />
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">drag to set play order</MudText>
+        </div>
+
+        <MudDropContainer T="SeriesGame" @ref="_container"
+                          Items="Selected.Games"
+                          ItemsSelector="@((_, _) => true)"
+                          ItemDropped="OnDropped">
+            <ChildContent>
+                <MudDropZone T="SeriesGame" Identifier="series" AllowReorder="true"
+                             Class="d-flex flex-column gap-1" />
+            </ChildContent>
+            <ItemRenderer>
+                <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Rounded.DragIndicator" Size="Size.Small"
+                             Class="mud-text-secondary" />
+                    <MudText Typo="Typo.body2" Color="Color.Primary"
+                             Style="min-width:1.5rem;font-variant-numeric:tabular-nums">
+                        @(Selected!.Games.IndexOf(context) + 1)
+                    </MudText>
+                    <MudText Typo="Typo.body1"
+                             Class="@(context.Finished ? "mud-text-disabled" : "")"
+                             Style="@(context.Finished ? "text-decoration:line-through" : "")">
+                        @context.Name
+                    </MudText>
+                    <MudSpacer />
+                    @if (context.Finished)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">finished</MudChip>
+                    }
+                    <MudIconButton Icon="@Icons.Material.Rounded.Close" Size="Size.Small"
+                                   title="Remove from series"
+                                   OnClick="@(() => RemoveAsync(context))" />
+                </MudPaper>
+            </ItemRenderer>
+        </MudDropContainer>
+
+        @if (Selected.Games.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                No games in this series yet. Add one below.
+            </MudText>
+        }
+
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mt-2">
+            Position 1 is played first. A game only becomes available once every entry
+            above it is finished, so a struck-through title here is what unblocks the next.
+        </MudText>
+
+        @* Searches EVERY game, finished included: a series is a chain of what you
+           have played and what you have not, and marking an entry finished is
+           what unblocks the next one. *@
+        <MudAutocomplete T="PickGame" Label="Add a game" Class="mt-4"
+                         SearchFunc="SearchGames" ToStringFunc="@(g => g?.Name ?? "")"
+                         Variant="Variant.Outlined" Margin="Margin.Dense"
+                         ValueChanged="AddAsync" Clearable="true"
+                         Placeholder="search every game">
+            <ItemTemplate Context="g">
+                <div class="d-flex align-center gap-2">
+                    <MudText Typo="Typo.body2"
+                             Style="@(g.Finished ? "text-decoration:line-through" : "")">
+                        @g.Name
+                    </MudText>
+                    @if (g.Series is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                 Variant="Variant.Filled">moves out of @g.Series</MudChip>
+                    }
+                </div>
+            </ItemTemplate>
+        </MudAutocomplete>
+
+        <div class="mt-6">
+            @if (_confirmDelete)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    Delete "@Selected.Name"? Its @Selected.Games.Count games are released, not deleted.
+                    <MudButton Size="Size.Small" Color="Color.Error" Class="ml-2"
+                               OnClick="DeleteAsync">Delete</MudButton>
+                    <MudButton Size="Size.Small" OnClick="@(() => _confirmDelete = false)">Keep</MudButton>
+                </MudAlert>
+            }
+            else
+            {
+                <MudButton Color="Color.Error" Size="Size.Small" Variant="Variant.Text"
+                           OnClick="@(() => _confirmDelete = true)">
+                    delete this series
+                </MudButton>
+            }
+        </div>
+    }
+}
+
+@code {
+    private List<Series>? _series;
+    private List<PickGame> _all = [];
+    private int? _selectedId;
+    private string _newName = "";
+    private bool _confirmDelete;
+    private MudDropContainer<SeriesGame>? _container;
+
+    private Series? Selected => _series?.FirstOrDefault(s => s.Id == _selectedId);
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _series = await Repo.GetSeriesAsync();
+        _all = await Repo.GetAllGamesAsync();
+        if (_series.All(s => s.Id != _selectedId)) _selectedId = null;
+        _confirmDelete = false;
+        _container?.Refresh();
+    }
+
+    private void Select(int id)
+    {
+        _selectedId = id;
+        _confirmDelete = false;
+        _container?.Refresh();
+    }
+
+    private async Task OnNewKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(_newName)) return;
+
+        var created = await Repo.CreateSeriesAsync(_newName);
+        _newName = "";
+        _selectedId = created.Id;
+        await ReloadAsync();
+        Snackbar.Add($"Series \"{created.Name}\"", MudBlazor.Severity.Success);
+    }
+
+    private Task<IEnumerable<PickGame>> SearchGames(string? value, CancellationToken ct)
+    {
+        if (Selected is null || string.IsNullOrWhiteSpace(value) || value.Trim().Length < 2)
+        {
+            return Task.FromResult(Enumerable.Empty<PickGame>());
+        }
+
+        var already = Selected.Games.Select(g => g.Id).ToHashSet();
+        return Task.FromResult(_all
+            .Where(g => !already.Contains(g.Id))
+            .Where(g => g.Name.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .Take(12));
+    }
+
+    private async Task AddAsync(PickGame? game)
+    {
+        if (game is null || Selected is null) return;
+        if (Selected.Games.Any(g => g.Id == game.Id)) return;
+
+        Selected.Games.Add(new SeriesGame(game.Id, game.Name,
+            Selected.Games.Count + 1, game.Finished));
+        await SaveAsync();
+    }
+
+    private async Task RemoveAsync(SeriesGame game)
+    {
+        Selected!.Games.Remove(game);
+        await SaveAsync();
+    }
+
+    private async Task OnDropped(MudItemDropInfo<SeriesGame> drop)
+    {
+        if (drop.Item is null || Selected is null) return;
+
+        var list = Selected.Games;
+        var from = list.IndexOf(drop.Item);
+        if (from < 0) return;
+
+        var to = Math.Clamp(drop.IndexInZone, 0, list.Count - 1);
+        list.RemoveAt(from);
+        list.Insert(to, drop.Item);
+
+        await SaveAsync();
+    }
+
+    /// <summary>
+    /// Sends the COMPLETE membership in order: the server detaches anything
+    /// absent and renumbers the rest 1..n, so add, reorder and remove are one
+    /// call. Always reload afterwards -- a game moved in from another series
+    /// has to disappear from that one.
+    /// </summary>
+    private async Task SaveAsync()
+    {
+        try
+        {
+            await Repo.SetSeriesOrderAsync(Selected!.Id, Selected.Games.Select(g => g.Id).ToList());
+            Snackbar.Add("Saved", MudBlazor.Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", MudBlazor.Severity.Error);
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Repo.DeleteSeriesAsync(Selected!.Id);
+        _selectedId = null;
+        await ReloadAsync();
+        Snackbar.Add("Series deleted", MudBlazor.Severity.Success);
+    }
+}

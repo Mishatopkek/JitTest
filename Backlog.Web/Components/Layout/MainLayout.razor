@@ -1,0 +1,134 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject UiState Ui
+@inject IJSRuntime Js
+
+<MudThemeProvider @ref="_themeProvider" @bind-IsDarkMode="_isDarkMode" Theme="Theme" />
+<MudPopoverProvider />
+<MudDialogProvider CloseButton="true" CloseOnEscapeKey="true" />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense="true" Color="Color.Transparent">
+        <MudText Typo="Typo.h6" Class="mr-6">Backlog</MudText>
+
+        <MudButton Href="/" Color="Color.Inherit">Play order</MudButton>
+        <MudButton Href="/series" Color="Color.Inherit">Series</MudButton>
+        <MudButton Href="/sizes" Color="Color.Inherit">Sizes</MudButton>
+        <MudButton Href="/add" Color="Color.Inherit"
+                   StartIcon="@Icons.Material.Rounded.Add">Add</MudButton>
+
+        <MudSpacer />
+
+        @* Hidden by default: knowing a game is 2h tells you what you are in for
+           before you start it. Picking a size bucket is deliberate; the exact
+           length inside it should stay a surprise. *@
+        <MudIconButton Icon="@(Ui.ShowHours ? Icons.Material.Rounded.Timer : Icons.Material.Rounded.TimerOff)"
+                       Color="@(Ui.ShowHours ? Color.Primary : Color.Inherit)"
+                       title="@(Ui.ShowHours ? "Hide how long games take" : "Show how long games take")"
+                       OnClick="@(() => Ui.ToggleHours())" />
+
+        <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Rounded.LightMode : Icons.Material.Rounded.DarkMode)"
+                       Color="Color.Inherit"
+                       title="@(_isDarkMode ? "Switch to light" : "Switch to dark")"
+                       OnClick="ToggleTheme" />
+    </MudAppBar>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.Medium" Class="py-6">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private MudThemeProvider _themeProvider = null!;
+    private bool _isDarkMode;
+
+    // Warm, low-chroma palette carried over from the old hand-written UI, so
+    // the app still looks like itself rather than stock Material blue.
+    public static readonly MudTheme Theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#9a5b2c",
+            Background = "#fbfaf8",
+            Surface = "#ffffff",
+            AppbarBackground = "#fbfaf8",
+            AppbarText = "#1b1a18",
+            TextPrimary = "#1b1a18",
+            TextSecondary = "#78736c",
+            LinesDefault = "#e5e1da"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#d69a63",
+            Background = "#161513",
+            Surface = "#1e1d1a",
+            AppbarBackground = "#161513",
+            AppbarText = "#ece8e1",
+            TextPrimary = "#ece8e1",
+            TextSecondary = "#918b82",
+            LinesDefault = "#302e2a"
+        },
+        LayoutProperties = new LayoutProperties { DefaultBorderRadius = "6px" }
+    };
+
+    // Follow the OS until the user picks a side, then stop -- otherwise the
+    // watcher pushes the system value back and the toggle appears dead.
+    private bool _followSystem = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _isDarkMode = await _themeProvider.GetSystemDarkModeAsync();
+        await _themeProvider.WatchSystemDarkModeAsync(OnSystemDarkModeChanged);
+        StateHasChanged();
+        await StampThemeAsync();
+    }
+
+    private async Task OnSystemDarkModeChanged(bool isDark)
+    {
+        if (!_followSystem) return;
+
+        _isDarkMode = isDark;
+        StateHasChanged();
+        await StampThemeAsync();
+    }
+
+    private async Task ToggleTheme()
+    {
+        _followSystem = false;
+        _isDarkMode = !_isDarkMode;
+        await StampThemeAsync();
+    }
+
+    /// <summary>
+    /// Hands control back to MudThemeProvider by putting data-theme on &lt;html&gt;,
+    /// which stops the pre-hydration fallback in app.css from applying.
+    /// </summary>
+    private async Task StampThemeAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("setTheme", _isDarkMode ? "dark" : "light");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit went away mid-call; nothing to style.
+        }
+    }
+
+    protected override void OnInitialized() => Ui.Changed += Redraw;
+
+    public void Dispose() => Ui.Changed -= Redraw;
+
+    private void Redraw() => InvokeAsync(StateHasChanged);
+}

@@ -1,0 +1,281 @@
+@page "/"
+@rendermode InteractiveServer
+@inject BacklogRepository Repo
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Play order</PageTitle>
+
+@if (_board is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Elevation="0" Class="d-flex flex-wrap align-center gap-2 pa-3 mb-4">
+        <MudText Typo="Typo.overline" Class="mr-2">Tags</MudText>
+
+        @foreach (var tag in _tags)
+        {
+            var key = tag.ToLowerInvariant();
+            var on = _activeTags.Contains(key);
+            <MudChip T="string"
+                     Variant="@(on ? Variant.Filled : Variant.Outlined)"
+                     Color="@(on ? Color.Primary : Color.Default)"
+                     Size="Size.Small"
+                     OnClick="@(() => ToggleTag(key))">
+                @tag <span class="mud-text-disabled ml-1">@CountWith(key, on)</span>
+            </MudChip>
+        }
+
+        @if (_activeTags.Count > 0)
+        {
+            <MudChip T="string" Variant="Variant.Text" Size="Size.Small"
+                     OnClick="ClearTags">clear</MudChip>
+        }
+
+        <MudSpacer />
+
+        <MudTextField T="string" Value="_search" ValueChanged="OnSearchChanged"
+                      Immediate="true" Clearable="true" DebounceInterval="150"
+                      Placeholder="name, tag or series" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Rounded.Search"
+                      Style="max-width:20rem" />
+    </MudPaper>
+
+    <div class="d-flex align-center mb-2">
+        <MudText Typo="Typo.overline">Ranked (@_board.Ranked.Count)</MudText>
+        <MudSpacer />
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+            @(Filtering ? "" : "drag to reorder")
+        </MudText>
+    </div>
+
+    @if (Filtering)
+    {
+        @* Reordering is off while filtered. IndexInZone is an index into the
+           RENDERED list, so a filtered drop would compute a wrong global order,
+           and the save sends the complete list -- it would unrank the rest. *@
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+            Showing @RankedShown.Count of @_board.Ranked.Count ranked.
+            Dragging is off while filtered — clear the filter to reorder.
+        </MudAlert>
+    }
+
+    @* Items must be ONE stable list instance, mutated in place. Handing
+       MudDropContainer a freshly built list on every render desynchronises the
+       reorder bookkeeping it keeps per item, and rows render in a jumbled
+       order. _shownRanked is rebuilt only when the data or the filter changes,
+       and always followed by Refresh(). *@
+    <MudDropContainer T="Game" @ref="_container"
+                      Items="_shownRanked"
+                      ItemsSelector="@((_, _) => true)"
+                      ItemDropped="OnRankedDropped"
+                      Class="mb-6">
+        <ChildContent>
+            <MudDropZone T="Game" Identifier="ranked" AllowReorder="@(!Filtering)"
+                         Class="d-flex flex-column gap-1" />
+        </ChildContent>
+        <ItemRenderer>
+            <GameRow Game="context"
+                     Position="@PositionOf(context)"
+                     Draggable="@(!Filtering)"
+                     Tags="_tags"
+                     OnChanged="ReloadAsync"
+                     OnUnrank="@(() => UnrankAsync(context))" />
+        </ItemRenderer>
+    </MudDropContainer>
+
+    <MudText Typo="Typo.overline" Class="d-block mb-2">
+        Unranked (@_board.Unranked.Count)
+    </MudText>
+
+    @if (UnrankedShown.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-6">Nothing here.</MudText>
+    }
+    else
+    {
+        <div class="d-flex flex-column gap-1 mb-6">
+            @foreach (var game in UnrankedShown)
+            {
+                <GameRow Game="game" Position="null" Draggable="false" Tags="_tags"
+                         OnChanged="ReloadAsync"
+                         OnRank="@(() => RankAsync(game))" />
+            }
+        </div>
+    }
+
+    <MudExpansionPanels Elevation="0" Class="mt-4">
+        <MudExpansionPanel Text="@($"Finished ({_board.Done.Count})")">
+            @if (DoneShown.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Nothing finished yet.</MudText>
+            }
+            else
+            {
+                <div class="d-flex flex-column gap-1">
+                    @foreach (var game in DoneShown)
+                    {
+                        <GameRow Game="game" Position="null" Draggable="false" Tags="_tags"
+                                 OnChanged="ReloadAsync" />
+                    }
+                </div>
+            }
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+}
+
+@code {
+    private Board? _board;
+    private List<string> _tags = [];
+    private readonly HashSet<string> _activeTags = [];
+    private string _search = "";
+    private MudDropContainer<Game>? _container;
+
+    private bool Filtering => _activeTags.Count > 0 || _search.Trim().Length > 0;
+
+    // One instance for the lifetime of the page; contents are replaced, never
+    // the list itself. See the comment on MudDropContainer above.
+    private readonly List<Game> _shownRanked = [];
+    private List<Game> RankedShown => _shownRanked;
+    private List<Game> UnrankedShown => Filter(_board!.Unranked);
+    private List<Game> DoneShown => Filter(_board!.Done);
+
+    // gameId -> 1-based rank, so rendering 234 rows is not O(n^2) IndexOf calls.
+    private Dictionary<int, int> _rankOf = [];
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _board = await Repo.GetBoardAsync();
+        _tags = await Repo.GetTagsAsync();
+
+        _rankOf = _board.Ranked
+            .Select((g, i) => (g.Id, Rank: i + 1))
+            .ToDictionary(x => x.Id, x => x.Rank);
+
+        RefreshShown();
+    }
+
+    private void RefreshShown()
+    {
+        _shownRanked.Clear();
+        _shownRanked.AddRange(Filter(_board!.Ranked));
+        _container?.Refresh();
+    }
+
+    private List<Game> Filter(List<Game> games)
+    {
+        var needle = _search.Trim().ToLowerInvariant();
+
+        return games.Where(g =>
+        {
+            // Tag chips are AND, matching game_by_tag() and game_roll():
+            // picking PC + co-op means both, not either.
+            if (_activeTags.Count > 0)
+            {
+                var own = g.Tags.Select(t => t.ToLowerInvariant()).ToHashSet();
+                if (!_activeTags.All(own.Contains)) return false;
+            }
+
+            if (needle.Length == 0) return true;
+
+            return g.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || g.Tags.Any(t => t.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                || (g.Series ?? "").Contains(needle, StringComparison.OrdinalIgnoreCase);
+        }).ToList();
+    }
+
+    /// <summary>
+    /// While filtered, show the game's REAL priority. The visible index would
+    /// read 1, 2, 3 for games actually ranked 3, 7 and 10.
+    /// </summary>
+    private int? PositionOf(Game game) =>
+        Filtering
+            ? game.Priority
+            : _rankOf.TryGetValue(game.Id, out var rank) ? rank : game.Priority;
+
+    /// <summary>Games left if this chip were also selected -- so a dead end shows 0 first.</summary>
+    private int CountWith(string tag, bool alreadyOn)
+    {
+        var want = alreadyOn ? _activeTags : new HashSet<string>(_activeTags) { tag };
+        var all = _board!.Ranked.Concat(_board.Unranked).Concat(_board.Done);
+        return all.Count(g =>
+        {
+            var own = g.Tags.Select(t => t.ToLowerInvariant()).ToHashSet();
+            return want.All(own.Contains);
+        });
+    }
+
+    private void ToggleTag(string tag)
+    {
+        if (!_activeTags.Remove(tag)) _activeTags.Add(tag);
+        RefreshShown();
+    }
+
+    private void ClearTags()
+    {
+        _activeTags.Clear();
+        RefreshShown();
+    }
+
+    private void OnSearchChanged(string value)
+    {
+        _search = value ?? "";
+        RefreshShown();
+    }
+
+    private async Task OnRankedDropped(MudItemDropInfo<Game> drop)
+    {
+        // Belt and braces: the zone is already non-reorderable while filtered,
+        // but a drop here would save a partial list and unrank the rest.
+        if (Filtering || drop.Item is null) { RefreshShown(); return; }
+
+        var list = _board!.Ranked;
+        var from = list.IndexOf(drop.Item);
+        if (from < 0) return;
+
+        var to = Math.Clamp(drop.IndexInZone, 0, list.Count - 1);
+        list.RemoveAt(from);
+        list.Insert(to, drop.Item);
+
+        await SaveOrderAsync();
+    }
+
+    private async Task RankAsync(Game game)
+    {
+        _board!.Unranked.Remove(game);
+        _board.Ranked.Add(game);
+        await SaveOrderAsync();
+    }
+
+    private async Task UnrankAsync(Game game)
+    {
+        _board!.Ranked.Remove(game);
+        _board.Unranked.Add(game);
+        await SaveOrderAsync();
+    }
+
+    /// <summary>
+    /// Always sends the COMPLETE ranked list. The server unranks anything absent
+    /// and renumbers the rest 1..n, so this one call covers reorder, add and
+    /// remove -- and must never be handed a filtered subset.
+    /// </summary>
+    private async Task SaveOrderAsync()
+    {
+        try
+        {
+            await Repo.SetOrderAsync(_board!.Ranked.Select(g => g.Id).ToList());
+            await ReloadAsync();
+            Snackbar.Add("Saved", MudBlazor.Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", MudBlazor.Severity.Error);
+            await ReloadAsync();
+        }
+    }
+}

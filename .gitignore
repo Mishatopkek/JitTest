@@ -1,0 +1,20 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+
+## Rider / JetBrains
+# .idea holds machine-local data source definitions (dataSources.xml points at
+# the Postgres host) and per-user layout. Nothing in it is worth versioning.
+.idea/
+
+## User secrets are stored outside the repo by design; this is belt and braces.
+secrets.json
+appsettings.*.local.json
+
+## Holds the real DB host, port, database and user. The committed docs use
+## placeholders instead, so this repo stays safe to make public.
+CLAUDE.local.md
+
+## OS noise
+Thumbs.db
+.DS_Store

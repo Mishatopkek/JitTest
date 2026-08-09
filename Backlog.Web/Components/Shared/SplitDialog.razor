@@ -1,0 +1,177 @@
+@inject BacklogRepository Repo
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@GameName</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+            The games inside this one purchase, in play order. The row itself stays
+            a single game — this never adds games you did not buy.
+        </MudText>
+
+        <MudDropContainer T="Row" @ref="_container"
+                          Items="_rows"
+                          ItemsSelector="@((_, _) => true)"
+                          ItemDropped="OnDropped">
+            <ChildContent>
+                <MudDropZone T="Row" Identifier="parts" AllowReorder="true"
+                             Class="d-flex flex-column gap-2" />
+            </ChildContent>
+            <ItemRenderer>
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Rounded.DragIndicator"
+                             Size="Size.Small" Class="mud-text-secondary" />
+                    <MudTextField T="string" Value="context.Name"
+                                  ValueChanged="@(v => context.Name = v)"
+                                  Immediate="true" Margin="Margin.Dense"
+                                  Variant="Variant.Outlined" Placeholder="game name" />
+                    @if (context.WasFinished)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                                 Variant="Variant.Filled"
+                                 title="Keeps its finished mark as long as the name stays the same">
+                            finished
+                        </MudChip>
+                    }
+                    <MudIconButton Icon="@Icons.Material.Rounded.Close" Size="Size.Small"
+                                   title="Remove" OnClick="@(() => Remove(context))" />
+                </div>
+            </ItemRenderer>
+        </MudDropContainer>
+
+        <MudButton StartIcon="@Icons.Material.Rounded.Add" Class="mt-2"
+                   Variant="Variant.Outlined" FullWidth="true" OnClick="Add">
+            add a game
+        </MudButton>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">@_error</MudAlert>
+        }
+
+        @if (_confirmUndo)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                Undo the split and drop its @Existing.Count parts?
+                @if (Existing.Count(p => p.Finished) is var played && played > 0)
+                {
+                    <text>You will lose the finished mark on @played.</text>
+                }
+                <MudButton Size="Size.Small" Color="Color.Error" Class="ml-2"
+                           OnClick="UndoAsync">Yes, undo</MudButton>
+                <MudButton Size="Size.Small" OnClick="@(() => _confirmUndo = false)">Keep</MudButton>
+            </MudAlert>
+        }
+    </DialogContent>
+
+    <DialogActions>
+        @if (Existing.Count > 0)
+        {
+            <MudButton Color="Color.Error" OnClick="@(() => _confirmUndo = true)">undo split</MudButton>
+        }
+        <MudSpacer />
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+
+    [Parameter, EditorRequired] public int GameId { get; set; }
+    [Parameter, EditorRequired] public string GameName { get; set; } = "";
+    [Parameter] public List<Part> Existing { get; set; } = [];
+
+    private sealed class Row
+    {
+        public string Name { get; set; } = "";
+        public bool WasFinished { get; init; }
+    }
+
+    private List<Row> _rows = [];
+    private MudDropContainer<Row>? _container;
+    private string? _error;
+    private bool _confirmUndo;
+
+    protected override void OnInitialized()
+    {
+        _rows = Existing.Count > 0
+            ? Existing.Select(p => new Row { Name = p.Name, WasFinished = p.Finished }).ToList()
+            : [new Row(), new Row()];
+    }
+
+    private void Add()
+    {
+        _rows.Add(new Row());
+        _container?.Refresh();
+    }
+
+    private void Remove(Row row)
+    {
+        _rows.Remove(row);
+        _container?.Refresh();
+    }
+
+    private void OnDropped(MudItemDropInfo<Row> drop)
+    {
+        if (drop.Item is null) return;
+        var from = _rows.IndexOf(drop.Item);
+        if (from < 0) return;
+
+        var to = Math.Clamp(drop.IndexInZone, 0, _rows.Count - 1);
+        _rows.RemoveAt(from);
+        _rows.Insert(to, drop.Item);
+        _container?.Refresh();
+    }
+
+    private async Task SaveAsync()
+    {
+        var names = _rows.Select(r => r.Name.Trim()).Where(n => n.Length > 0).ToList();
+
+        if (names.Count == 1)
+        {
+            _error = "A split needs at least two games.";
+            return;
+        }
+
+        // Emptying every row means "undo the split" -- make that deliberate.
+        if (names.Count == 0)
+        {
+            if (Existing.Count == 0) { Dialog.Cancel(); return; }
+            _confirmUndo = true;
+            return;
+        }
+
+        // Progress is kept by matching part names, so duplicates would collide.
+        if (names.Select(n => n.ToLowerInvariant()).Distinct().Count() != names.Count)
+        {
+            _error = "Two rows have the same name.";
+            return;
+        }
+
+        await ApplyAsync(names);
+    }
+
+    private Task UndoAsync() => ApplyAsync([]);
+
+    private async Task ApplyAsync(List<string> names)
+    {
+        try
+        {
+            await Repo.ReplacePartsAsync(GameId, names);
+            Snackbar.Add(names.Count > 0 ? $"Split into {names.Count}" : "Split undone",
+                MudBlazor.Severity.Success);
+            Dialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _confirmUndo = false;
+        }
+    }
+
+    private void Cancel() => Dialog.Cancel();
+}
