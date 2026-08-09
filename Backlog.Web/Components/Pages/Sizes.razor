@@ -43,13 +43,20 @@ else
         </MudText>
 
         @* One series, so no legend: the heading names it, and a second colour
-           would be encoding nothing. Value labels are off on purpose -- a number
-           over all ten bars is noise; the tooltip and the table carry the exact
-           counts. *@
+           would be encoding nothing.
+
+           A line rather than bars because the shape is the point. The cost is
+           that a line invites reading its SLOPE, and slope is not meaningful
+           here: the bands are deliberately uneven (2h wide at the left, 20h at
+           the right, open-ended at the end), so the x-axis is band positions and
+           not a linear hours scale. The markers are there to keep it honest --
+           they are the ten measured counts, and the segments merely join them.
+           Equal-width bands would make slope literally readable, at the cost of
+           crushing most of the collection into the first point. *@
         @* Height covers plot AND the x-axis band, so the axis labels are not cut
            off into a nested scrollbar. *@
         <MudChart T="double"
-                  ChartType="ChartType.Bar"
+                  ChartType="ChartType.Line"
                   ChartSeries="_bandSeries"
                   ChartLabels="_bandLabels"
                   ChartOptions="_bandOptions"
@@ -167,11 +174,11 @@ else
     /// The colour is a CSS variable rather than a literal so the chart follows
     /// MainLayout.Theme and dark mode without this page knowing either.
     /// </summary>
-    private readonly BarChartOptions _bandOptions = new()
+    private readonly LineChartOptions _bandOptions = new()
     {
         ChartPalette = ["var(--mud-palette-primary)"],
-        // Horizontal rules only. Verticals on a histogram fence off each bar and
-        // add nothing -- the bars are already separated.
+        // Horizontal rules only. Verticals would fence off each band and add
+        // nothing the x labels do not already say.
         XAxisLines = false,
         YAxisLines = true,
         // Counts are whole games; a "12.5 games" tick would be nonsense.
@@ -182,12 +189,22 @@ else
         // the chart as a caption instead.
         ShowLegend = false,
         ShowToolTips = true,
-        // A number stamped over all ten bars is noise and goes unread. The
-        // tooltip and the table below carry the exact counts.
-        ShowValues = false,
-        // Leaves a gap between neighbouring bars instead of a solid block of
-        // colour, and keeps the marks thin rather than heavy.
-        BarWidthRatio = 0.65
+
+        // Straight segments, never a spline. A spline invents curvature between
+        // two bands and can bow below the baseline, which would literally draw a
+        // negative number of games. ClampToZero is the belt to that braces.
+        InterpolationOption = InterpolationOption.Straight,
+        ClampToZero = true,
+
+        // The ten measured counts, marked. The segments only join them -- there
+        // is no reading between two bands, and the markers are what keeps the
+        // line from being read as a continuous curve over hours.
+        ShowDataMarkers = true,
+        LineStrokeWidth = 2,
+
+        // A count axis must start at zero. Cropping the baseline would turn the
+        // hump around 20-30h into a cliff.
+        YAxisRequireZeroPoint = true
     };
 
     // Hiding the Hours column is not enough on its own -- a list ordered by

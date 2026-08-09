@@ -46,7 +46,7 @@ Key objects:
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
 | `v_roll_pool` | the units you can start right now, with tags; **the one definition of the rollable pool** |
 | `v_game_tiers` | `v_roll_pool` bucketed short/medium/long by `NTILE(3)` |
-| `v_game_length_bands` | `v_roll_pool` counted into fixed hour bands — the distribution `/sizes` charts |
+| `v_game_length_bands` | `v_roll_pool` counted into fixed hour bands — the distribution `/sizes` plots |
 | `game_roll()` | rolls by bucket; redirects to a series head |
 | `game_roll_range()` | rolls by an hours range + tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
@@ -104,19 +104,26 @@ distribution on `/sizes` reads `v_game_length_bands`; band edges are never
 recomputed in C#. Conventions that chart follows, and any new one should:
 
 - **One series → one colour and no legend.** The heading names the series. Never
-  shade bars by their own value — bar length already encodes it.
+  shade a mark by its own value — its length or height already encodes it.
 - **Colours are `var(--mud-palette-*)`**, passed straight into `ChartPalette`,
   which MudBlazor emits into the SVG. So a chart follows the theme and dark mode
   without the page knowing which is active.
-- **No value label on every bar** (`ShowValues = false`). The hover tooltip and a
-  table view carry exact numbers; ten stamped numbers are noise.
+- **No value printed on every point.** The hover tooltip and a table view carry
+  exact numbers; ten stamped numbers are noise.
 - **Every chart has a table twin.** A tooltip must never be the only way to read
   a value.
 - Aggregate charts are **not** gated behind `ShowHours`: they name no game, so
   they cannot spoil a title. Anything naming a game still is.
-- Axis options live on the per-type options class (`BarChartOptions`), not on the
-  base `ChartOptions`. Skip `XAxisTitle` — MudBlazor renders it *above* the plot,
-  where it reads as a second heading.
+- Axis options live on the per-type options class (`LineChartOptions`,
+  `BarChartOptions`), not on the base `ChartOptions`. Skip `XAxisTitle` —
+  MudBlazor renders it *above* the plot, where it reads as a second heading.
+- On a line chart, `InterpolationOption.Straight` and never a spline: a spline
+  invents curvature between measured points and can bow below the baseline,
+  drawing a negative count. Keep `ShowDataMarkers` on so the measured points stay
+  visible, and `YAxisRequireZeroPoint` so a count axis starts at zero.
+- **Synthetic mouse events do not reliably drive MudBlazor chart tooltips**, the
+  same way they do not drive its drag. Verify hover with a real pointer, or lean
+  on the table twin.
 
 **Interactivity is global**, set on `<Routes>` and `<HeadOutlet>` in
 `App.razor`. Per-page `@rendermode` leaves the layout static and its buttons

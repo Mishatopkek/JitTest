@@ -372,9 +372,12 @@ read as "no parts" and wiped the split.
 
 `custom.v_game_length_bands` counts the startable pool into fixed hour bands —
 `0–2, 2–4, 4–6, 6–10, 10–15, 15–20, 20–30, 30–40, 40–60, 60+` — and `/sizes`
-draws it as a bar chart. It answers what three equal thirds cannot: whether
-what's left is mostly quick hits or mostly monsters. Thirds are always a third
-each.
+plots it as a line with a marker per band. It answers what three equal thirds
+cannot: whether what's left is mostly quick hits or mostly monsters. Thirds are
+always a third each.
+
+Because the bands are uneven, the *slope* of that line is not a rate — the
+x-axis is band positions, not hours. The markers are the measured values.
 
 ```sql
 SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
