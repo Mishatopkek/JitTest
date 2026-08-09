@@ -370,30 +370,52 @@ read as "no parts" and wiped the split.
 
 #### The distribution chart on /sizes
 
-`custom.v_game_length_bands` counts the startable pool into fixed hour bands —
-`0–2, 2–4, 4–6, 6–10, 10–15, 15–20, 20–30, 30–40, 40–60, 60+` — and `/sizes`
-plots it as a line with a marker per band. It answers what three equal thirds
-cannot: whether what's left is mostly quick hits or mostly monsters. Thirds are
-always a third each.
-
-Because the bands are uneven, the *slope* of that line is not a rate — the
-x-axis is band positions, not hours. The markers are the measured values.
+`custom.v_game_length_bands` counts the startable pool into **equal 5-hour bands
+from 0 to 60, plus one open-ended `60+`** — 13 points — and `/sizes` plots it as a
+line with a marker per band. It answers what three equal thirds cannot: whether
+what's left is mostly quick hits or mostly monsters. Thirds are always a third
+each.
 
 ```sql
-SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
+SELECT label, from_hours, to_hours, units, band_hours
+FROM custom.v_game_length_bands ORDER BY ord;
 ```
 
-Three things about the view:
+**Why a band at all, rather than plotting raw hours?** Because a count needs an
+interval. Hours are effectively continuous here: 193 units hold 150 distinct
+values and 117 of those belong to a single game, so tallying at raw values gives
+150 spikes of height 1. The band is what turns "one game at 18.33h" into "29 games
+between 10h and 15h". (If you want the raw numbers with no bands at all, the chart
+has to stop counting and plot each game's length instead — a different question.)
+
+**Why equal width.** The first version used bands that widened to the right (2h at
+the left, 20h at the right) so every band stayed populated. It lied. A 10-hour band
+collects about twice the games of a 5-hour one at the same density, so `20–30h`
+showed 38 and read as the peak of the collection — when at uniform width the real
+peak is `5–10h` with 33. Bin width was being read as signal. With uniform steps a
+taller point simply means more games, and the slope between two points is a real
+rate.
+
+Both numbers come from the data rather than taste:
+
+- **5 hours**, because at that width every band holds at least one game and most
+  hold four or more. At 2h steps four bands come out empty and the average drops to
+  6 per band — that is sampling noise, not shape.
+- **Cap at 60**, because past it the pool runs 0–2 games per 5h step: eight points
+  all saying "nothing out here", two of them empty. The tail collapses into `60+`
+  instead.
+
+Two more things about the view:
 
 - **Bands are half-open, `[lo, hi)`**, so nothing is double-counted and a game
   sitting exactly on a boundary lands in the upper band. `sum(units)` equals
   `count(*)` from `v_roll_pool` exactly.
 - **The join is a LEFT JOIN** so an empty band still returns its row. Dropping it
   would close the gap on the chart's x-axis and misdescribe the distribution.
-- **The top band is open-ended** because the pool reaches 718 hours, and the bands
-  are deliberately uneven — narrow where the games are. 90% of the pool is under
-  60h with a median near 18h, so even 70-hour-wide bands would put nearly
-  everything in the first bar.
+
+The `60+` point is the one that is *not* a fixed width, so the step up into it is a
+change of band width and not a spike in the data. It is labelled `60+` for that
+reason.
 
 Built on `v_roll_pool`, like `v_game_tiers`, so the chart cannot describe a
 different set of games than the roll draws from.

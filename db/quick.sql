@@ -78,9 +78,15 @@ SELECT * FROM custom.game_roll_range(2, 6, ARRAY['Handheld']);
 SELECT start_name, start_hours, pool_size FROM custom.game_roll_range(2, 6);
 
 -- The shape of what is left: how many startable games sit in each length band.
--- This is what the chart at the top of /sizes draws. Three equal thirds cannot
--- tell you whether the backlog is mostly quick hits or mostly monsters; this can.
+-- Equal 5-hour steps to 60, then one open-ended 60+. This is what the chart at the
+-- top of /sizes draws. Three equal thirds cannot tell you whether the backlog is
+-- mostly quick hits or mostly monsters; this can.
 SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
+
+-- Sanity check after changing the band step: these two must agree, or a band is
+-- double-counting or dropping games.
+SELECT (SELECT sum(units) FROM custom.v_game_length_bands) AS banded,
+       (SELECT count(*)   FROM custom.v_roll_pool)         AS pool;
 
 -- The pool itself, which is what both the range roll and the tiers draw from.
 SELECT unit_name, game_name AS owned_as, hours, priority, tags

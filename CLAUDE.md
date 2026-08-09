@@ -121,6 +121,11 @@ recomputed in C#. Conventions that chart follows, and any new one should:
   invents curvature between measured points and can bow below the baseline,
   drawing a negative count. Keep `ShowDataMarkers` on so the measured points stay
   visible, and `YAxisRequireZeroPoint` so a count axis starts at zero.
+- **Histogram bands must be equal width.** A band twice as wide collects twice the
+  games at the same density, so unequal bands make bin width read as signal — that
+  bug had `/sizes` showing a peak at `20–30h` that does not exist. Uniform steps
+  also make the line's slope a real rate. Put the tail in one clearly-labelled
+  open-ended band rather than widening the others.
 - **Synthetic mouse events do not reliably drive MudBlazor chart tooltips**, the
   same way they do not drive its drag. Verify hover with a real pointer, or lean
   on the table twin.

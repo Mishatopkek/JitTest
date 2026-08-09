@@ -457,32 +457,43 @@ ORDER BY tier;
 -- the backlog mostly quick hits or mostly monsters", which the three equal
 -- thirds structurally cannot show -- thirds are always a third each.
 --
--- Bands are half-open, [lo, hi), so nothing is counted twice and a game sitting
--- exactly on a boundary lands in the upper band. The top band is open-ended
--- because the pool reaches 718 hours.
+-- Counting needs a band at all because hours are effectively continuous: 193
+-- units hold 150 distinct values and 117 of those belong to a single game, so
+-- tallying at raw values gives 150 spikes of height 1. The band is what turns
+-- "one game at 18.33h" into "29 games between 10h and 15h".
 --
--- Bands are deliberately uneven, narrow where the games are: 90% of the pool is
--- under 60h with a median near 18h, so even 70-hour-wide bands would put almost
--- everything in the first bar and say nothing.
+-- Bands are half-open, [lo, hi), so nothing is counted twice and a game sitting
+-- exactly on a boundary lands in the upper band.
+--
+-- EQUAL WIDTH, and that is load-bearing. An earlier version used bands that got
+-- wider to the right (2h at the left, 20h at the right) to keep every band
+-- populated. It lied: a 10-hour-wide band collects roughly twice the games of a
+-- 5-hour one at the same density, so "20-30h" showed 38 and looked like the peak
+-- of the collection when the real peak is 5-10h with 33. Bin width was being read
+-- as signal. With uniform steps a taller point means more games, full stop, and
+-- the slope of the line between two points is a real rate.
+--
+-- 5 hours to 60, then ONE open-ended band. Both numbers come from the data: at 5h
+-- every band holds at least one game and most hold 4 or more, while 2h steps open
+-- four holes and drop the average to 6 -- sampling noise, not shape. Past 60h the
+-- pool is 0-2 games per 5h step, eight points all saying "nothing out here", so
+-- the tail collapses into 60+ instead. That last band is not 5h wide and will read
+-- as a step up; it is labelled so, and the table twin gives its real count.
 --
 -- LEFT JOIN, not an inner one: an empty band must still return its row. Dropping
 -- it would close the gap on the chart's x-axis and misdescribe the distribution.
 DROP VIEW IF EXISTS custom.v_game_length_bands;
 CREATE VIEW custom.v_game_length_bands AS
-WITH band (ord, label, lo, hi) AS (
-    VALUES ( 1, '0–2',    0::numeric,  2::numeric),
-           ( 2, '2–4',    2,           4),
-           ( 3, '4–6',    4,           6),
-           ( 4, '6–10',   6,          10),
-           ( 5, '10–15', 10,          15),
-           ( 6, '15–20', 15,          20),
-           ( 7, '20–30', 20,          30),
-           ( 8, '30–40', 30,          40),
-           ( 9, '40–60', 40,          60),
-           (10, '60+',   60,          NULL)
+WITH band AS (
+    SELECT g::numeric                                    AS lo,
+           CASE WHEN g < 60 THEN (g + 5)::numeric END    AS hi
+    FROM generate_series(0, 60, 5) AS g
 )
-SELECT b.ord,
-       b.label,
+SELECT (row_number() OVER (ORDER BY b.lo))::int          AS ord,
+       CASE WHEN b.hi IS NULL
+            THEN b.lo::text || '+'
+            ELSE b.lo::text || '–' || b.hi::text
+       END                                               AS label,
        b.lo                                              AS from_hours,
        b.hi                                              AS to_hours,
        count(r.game_id)                                  AS units,
@@ -491,8 +502,8 @@ FROM band b
 LEFT JOIN custom.v_roll_pool r
        ON r.hours >= b.lo
       AND (b.hi IS NULL OR r.hours < b.hi)
-GROUP BY b.ord, b.label, b.lo, b.hi
-ORDER BY b.ord;
+GROUP BY b.lo, b.hi
+ORDER BY b.lo;
 
 COMMENT ON VIEW custom.v_game_length_bands IS
     'Distribution of the startable pool across length bands -- the shape of the '

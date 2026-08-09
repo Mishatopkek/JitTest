@@ -32,27 +32,29 @@ else
        by construction, so they cannot answer "is my backlog mostly quick hits or
        mostly monsters" -- this can.
 
-       Deliberately NOT behind UiState.ShowHours. The bars name no game, so
+       Deliberately NOT behind UiState.ShowHours. The chart names no game, so
        nothing here tells you how long any particular title is; it describes the
        collection, which is the same thing the bucket counts below already do. *@
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudText Typo="Typo.subtitle2">Games you can start, by length</MudText>
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-            @_bandTotal playable units. Bands are narrow where the games are —
-            half of them sit under @_medianLabel.
+            @_bandTotal playable units in @_bandWidthLabel steps — half of them sit
+            under @_medianLabel. The last point is everything longer.
         </MudText>
 
         @* One series, so no legend: the heading names it, and a second colour
            would be encoding nothing.
 
-           A line rather than bars because the shape is the point. The cost is
-           that a line invites reading its SLOPE, and slope is not meaningful
-           here: the bands are deliberately uneven (2h wide at the left, 20h at
-           the right, open-ended at the end), so the x-axis is band positions and
-           not a linear hours scale. The markers are there to keep it honest --
-           they are the ten measured counts, and the segments merely join them.
-           Equal-width bands would make slope literally readable, at the cost of
-           crushing most of the collection into the first point. *@
+           A line rather than bars because the shape is the point, and the bands
+           are all one width, so the slope between two points is a real rate --
+           games per hour of length. That is why the bands were made uniform: with
+           the old widening bands, a 10-hour band collected twice the games of a
+           5-hour one at the same density, and "20-30h" read as the peak of the
+           collection when the true peak is 5-10h.
+
+           The one point that is not a fixed width is the last, which is
+           open-ended, so the step up into it is a change of band width and not a
+           spike in the data. It is labelled "60+" for that reason. *@
         @* Height covers plot AND the x-axis band, so the axis labels are not cut
            off into a nested scrollbar. *@
         <MudChart T="double"
@@ -163,6 +165,7 @@ else
     private string[] _bandLabels = [];
     private int _bandTotal;
     private string _medianLabel = "";
+    private string _bandWidthLabel = "";
 
     /// <summary>
     /// Bars are the theme primary, one colour for every bar. These bands are an
@@ -219,7 +222,16 @@ else
         _rows = await Repo.GetTiersAsync();
 
         _bands = await Repo.GetLengthBandsAsync();
-        _bandLabels = _bands.Select(b => b.Label).ToArray();
+
+        // Axis ticks carry the band's lower edge only ("0", "5", "10" ... "60+").
+        // Thirteen full "0–5" style labels collide on a narrow screen, and since
+        // the bands are all one width the lower edge already identifies each one.
+        // The table twin below shows the full range.
+        _bandLabels = _bands
+            .Select(b => b.IsOpenEnded
+                ? $"{b.FromHours:0.#}+"
+                : $"{b.FromHours:0.#}")
+            .ToArray();
         _bandSeries = [new ChartSeries<double>
         {
             Name = "Games",
@@ -227,6 +239,11 @@ else
         }];
         _bandTotal = _bands.Sum(b => b.Units);
         _medianLabel = MedianLabel();
+
+        // Read off the view rather than hardcoded, so changing the step in
+        // install.sql updates the caption with it.
+        var first = _bands.FirstOrDefault(b => !b.IsOpenEnded);
+        _bandWidthLabel = first is null ? "" : $"{first.ToHours!.Value - first.FromHours:0.#}-hour";
     }
 
     /// <summary>

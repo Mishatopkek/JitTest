@@ -80,9 +80,19 @@ public sealed record RollUnit(
 
 /// <summary>
 /// One length band of the startable pool, from custom.v_game_length_bands.
-/// Bands are half-open and ordered short to long; the last one is open-ended.
+/// Bands are half-open <c>[FromHours, ToHours)</c>, equal width, ordered short to
+/// long. <see cref="ToHours"/> is null on the last one, which is open-ended.
 /// </summary>
-public sealed record LengthBand(string Label, int Units, decimal BandHours);
+public sealed record LengthBand(
+    string Label,
+    decimal FromHours,
+    decimal? ToHours,
+    int Units,
+    decimal BandHours)
+{
+    /// <summary>True for the open-ended tail band, which is not a fixed width.</summary>
+    public bool IsOpenEnded => ToHours is null;
+}
 
 /// <summary>
 /// What custom.game_roll_range() landed on. No "redirected" field, unlike

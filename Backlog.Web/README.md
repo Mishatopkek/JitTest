@@ -37,14 +37,19 @@ are always a third each; the bands show the real shape. It reads
 `custom.v_game_length_bands` — the band edges live in that view, never in C#, so
 the chart and the roll can't disagree about where a band starts.
 
-**The one thing to know about reading it:** a line invites reading its *slope*,
-and slope is not meaningful here. The bands are deliberately uneven — 2h wide at
-the left, 20h at the right, open-ended at the end — so the x-axis is band
-positions, not a linear hours scale. The drop from `20–30` to `30–40` and the
-drop from `2–4` to `4–6` are not comparable rates. The data markers are there to
-keep that honest: they are the ten measured counts, and the segments merely join
-them. Equal-width bands would make slope literally readable, at the price of
-crushing most of the collection into the first point.
+**Bands are equal 5-hour steps to 60, plus one open-ended `60+`** — 13 points. The
+uniform width is the important part, and it was not the first attempt: bands that
+widened to the right kept every band populated but made bin width read as signal,
+so `20–30h` showed 38 games and looked like the peak of the collection. At uniform
+width the real peak is `5–10h`. Now a taller point just means more games, and the
+slope between two points is a real rate.
+
+`60+` is the one point that is not a fixed width, so the step up into it is a
+change of band width rather than a spike in the data — hence the label.
+
+Axis ticks show each band's **lower edge only** (`0, 5, 10 … 60+`). Thirteen full
+`0–5` style labels collide on a phone, and since the bands are one width the lower
+edge identifies each one; the table twin carries the full ranges.
 
 Conventions it follows, and that any chart added here should:
 
