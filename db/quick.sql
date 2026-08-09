@@ -77,6 +77,13 @@ SELECT * FROM custom.game_roll_range(2, 6, ARRAY['Handheld']);
 -- range and the tags hold for the game you are actually handed.
 SELECT start_name, start_hours, pool_size FROM custom.game_roll_range(2, 6);
 
+-- Or by size instead of by hours: 1/2/3 = short/medium/long, the same thirds
+-- v_game_tiers defines. The tier REPLACES the hour bounds rather than narrowing
+-- them, so the bounds below are ignored.
+SELECT * FROM custom.game_roll_range(NULL, NULL, NULL, 1);          -- something short
+SELECT * FROM custom.game_roll_range(NULL, NULL, ARRAY['PC'], 3);   -- a long PC one
+SELECT * FROM custom.game_roll_range(500, 600, NULL, 2);            -- tier wins
+
 -- The shape of what is left: how many startable games sit in each length band.
 -- Equal 5-hour steps to 60, then one open-ended 60+. This is what the chart at the
 -- top of /sizes draws. Three equal thirds cannot tell you whether the backlog is

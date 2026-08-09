@@ -358,7 +358,19 @@ SELECT u.game_id,
        u.series,
        u.series_id,
        u.series_position,
-       coalesce(tg.tags, '{}'::text[]) AS tags
+       coalesce(tg.tags, '{}'::text[]) AS tags,
+       -- The short/medium/long bucket lives here rather than in v_game_tiers so
+       -- that one row of this view is everything the roll screen needs to know
+       -- about a unit -- its length, its tags and its tier -- and so the tier can
+       -- never be computed over a different population than the roll draws from.
+       -- Window functions run after WHERE, so these are thirds of the playable
+       -- pool, not of the whole table.
+       NTILE(3) OVER (ORDER BY u.hours)  AS tier,
+       CASE NTILE(3) OVER (ORDER BY u.hours)
+           WHEN 1 THEN 'short'
+           WHEN 2 THEN 'medium'
+           ELSE        'long'
+       END                               AS tier_name
 FROM custom.v_unit u
 LEFT JOIN LATERAL (
     SELECT array_agg(t.tag_name::text ORDER BY t.tag_name) AS tags
@@ -370,16 +382,18 @@ WHERE u.playable
   AND u.hours IS NOT NULL;
 
 COMMENT ON VIEW custom.v_roll_pool IS
-    'Units you can start right now, with tags. The single definition of the '
-    'pool that v_game_tiers, game_roll_range() and the /roll count all use.';
+    'Units you can start right now, with tags and their short/medium/long tier. '
+    'The single definition of the pool that v_game_tiers, game_roll_range() and '
+    'the /roll screen all use.';
 
 
 -- v_game_tier_stats is built on this view, so it must be dropped first --
 -- a bare DROP VIEW fails while a dependent view exists.
 --
--- Built on v_roll_pool rather than restating its WHERE clause, so the tiers can
--- never bucket a different set of games than the roll draws from. Column list
--- is unchanged: game_random(), game_roll() and the app all join to it.
+-- Now a thin projection of v_roll_pool, which computes the tier itself. Keeping
+-- the NTILE in one place is the point: game_random(), game_roll(), the roll
+-- screen's tier buttons and this view must all agree on which third a game is in.
+-- Column list is unchanged -- game_random(), game_roll() and the app join to it.
 DROP VIEW IF EXISTS custom.v_game_tier_stats;
 DROP VIEW IF EXISTS custom.v_game_tiers CASCADE;
 CREATE VIEW custom.v_game_tiers AS
@@ -389,12 +403,8 @@ SELECT game_id AS id,          -- kept so old queries joining on id still work
        unit_name,
        game_name,
        hours AS hours_average,
-       NTILE(3) OVER (ORDER BY hours) AS tier,
-       CASE NTILE(3) OVER (ORDER BY hours)
-           WHEN 1 THEN 'short'
-           WHEN 2 THEN 'medium'
-           ELSE        'long'
-       END                            AS tier_name
+       tier,
+       tier_name
 FROM custom.v_roll_pool;
 
 
@@ -1117,10 +1127,20 @@ COMMENT ON FUNCTION custom.game_roll(text, text[]) IS
 --
 -- Tags are AND, matching game_by_tag() and game_roll(): ARRAY['PC','co-op']
 -- means both.
+--
+-- p_tier is the alternative to a range: 1/2/3 for short/medium/long. When it is
+-- given the hour bounds are ignored, because the two are different ways of saying
+-- the same kind of thing and honouring both would silently intersect them. It
+-- exists so the roll screen's tier buttons hit exactly the same rows as
+-- v_game_tiers -- deriving hour bounds from the tier and passing those instead
+-- would drift, since the boundaries are rounded for display and move as you
+-- finish things.
 DROP FUNCTION IF EXISTS custom.game_roll_range(numeric, numeric, text[]);
+DROP FUNCTION IF EXISTS custom.game_roll_range(numeric, numeric, text[], int);
 CREATE OR REPLACE FUNCTION custom.game_roll_range(p_min   numeric  DEFAULT NULL,
                                                   p_max   numeric  DEFAULT NULL,
-                                                  p_tags  text[]   DEFAULT NULL)
+                                                  p_tags  text[]   DEFAULT NULL,
+                                                  p_tier  int      DEFAULT NULL)
     RETURNS TABLE (
         start_name     text,   -- the part, when the thing to play is in a collection
         owned_as       text,   -- the row you actually own
@@ -1143,12 +1163,21 @@ BEGIN
             USING ERRCODE = 'invalid_parameter_value';
     END IF;
 
+    IF p_tier IS NOT NULL AND p_tier NOT BETWEEN 1 AND 3 THEN
+        RAISE EXCEPTION
+            'game_roll_range: tier must be 1, 2 or 3 (short, medium, long) -- got %',
+            p_tier
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
     RETURN QUERY
     WITH pool AS (
         SELECT r.*
         FROM custom.v_roll_pool r
-        WHERE (p_min IS NULL OR r.hours >= p_min)
-          AND (p_max IS NULL OR r.hours <= p_max)
+        -- Tier wins outright when given; see the note above.
+        WHERE (p_tier IS NOT NULL OR p_min IS NULL OR r.hours >= p_min)
+          AND (p_tier IS NOT NULL OR p_max IS NULL OR r.hours <= p_max)
+          AND (p_tier IS NULL OR r.tier = p_tier)
           AND (p_tags IS NULL
                OR NOT EXISTS (
                    SELECT 1
@@ -1185,10 +1214,11 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION custom.game_roll_range(numeric, numeric, text[]) IS
+COMMENT ON FUNCTION custom.game_roll_range(numeric, numeric, text[], int) IS
     'Roll a playable unit whose length falls in [p_min, p_max] (NULL = open '
-    'that side) and which carries all of p_tags. No series redirect: the pool '
-    'is playable units, so the range holds for what you are told to play.';
+    'that side), or whose tier is p_tier (1/2/3, which overrides the bounds), '
+    'and which carries all of p_tags. No series redirect: the pool is playable '
+    'units, so the filter holds for what you are told to play.';
 
 
 -- Insert a game and hand back the stored row.

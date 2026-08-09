@@ -72,7 +72,9 @@ public sealed record RollUnit(
     string OwnedAs,
     decimal Hours,
     int? Priority,
-    string[] Tags)
+    string[] Tags,
+    int Tier,
+    string TierName)
 {
     /// <summary>True when this unit is one game inside a collection you own.</summary>
     public bool IsPart => PartId is not null;

@@ -271,7 +271,8 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
     {
         await using var cmd = db.CreateCommand(
             """
-            SELECT game_id, part_id, unit_name, game_name, hours, priority, tags
+            SELECT game_id, part_id, unit_name, game_name, hours, priority, tags,
+                   tier, tier_name
             FROM custom.v_roll_pool
             ORDER BY unit_name
             """);
@@ -288,7 +289,9 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
                 reader.GetString(3),
                 reader.GetDecimal(4),
                 reader.IsDBNull(5) ? null : reader.GetInt32(5),
-                reader.GetFieldValue<string[]>(6)));
+                reader.GetFieldValue<string[]>(6),
+                reader.GetInt32(7),
+                reader.GetString(8)));
         }
 
         return units;
@@ -301,11 +304,17 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
     /// <param name="minHours">null leaves the bottom open.</param>
     /// <param name="maxHours">null leaves the top open -- which is what the last
     /// stop on the slider means, since the pool runs past 700 hours.</param>
+    /// <param name="tier">
+    /// 1/2/3 for short/medium/long. When given it REPLACES the hour bounds rather
+    /// than narrowing them -- the two are alternative ways of saying the same kind
+    /// of thing, and the function refuses to intersect them.
+    /// </param>
     /// <returns>null when nothing matched.</returns>
     public async Task<RollResult?> RollRangeAsync(
         decimal? minHours,
         decimal? maxHours,
         IEnumerable<string> tags,
+        int? tier = null,
         CancellationToken ct = default)
     {
         await using var cmd = db.CreateCommand(
@@ -313,13 +322,15 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
             SELECT start_name, owned_as, start_hours, start_priority, start_tags,
                    series, series_slot, series_total, pool_size,
                    start_game_id, start_part_id
-            FROM custom.game_roll_range(@min, @max, @tags)
+            FROM custom.game_roll_range(@min, @max, @tags, @tier)
             """);
 
         cmd.Parameters.Add(new NpgsqlParameter("min", NpgsqlDbType.Numeric)
             { Value = (object?)minHours ?? DBNull.Value });
         cmd.Parameters.Add(new NpgsqlParameter("max", NpgsqlDbType.Numeric)
             { Value = (object?)maxHours ?? DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("tier", NpgsqlDbType.Integer)
+            { Value = (object?)tier ?? DBNull.Value });
 
         // An empty array would demand a game carrying no tags at all; the
         // function wants NULL for "do not filter on tags".

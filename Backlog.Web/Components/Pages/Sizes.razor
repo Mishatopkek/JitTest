@@ -38,35 +38,27 @@ else
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudText Typo="Typo.subtitle2">Games you can start, by length</MudText>
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-            @_bandTotal playable units in @_bandWidthLabel steps — half of them sit
-            under @_medianLabel. The last point is everything longer.
+            One dot per game — all @_bandTotal of them, lined up shortest to
+            longest. Half sit under @_medianLabel.
         </MudText>
 
-        @* One series, so no legend: the heading names it, and a second colour
-           would be encoding nothing.
+        @* One dot per unit, no bands anywhere: x is the game's position in the
+           sorted pool and y is its own recorded length. Every value is its own
+           mark, which is as much resolution as 193 games have.
 
-           A line rather than bars because the shape is the point, and the bands
-           are all one width, so the slope between two points is a real rate --
-           games per hour of length. That is why the bands were made uniform: with
-           the old widening bands, a 10-hour band collected twice the games of a
-           5-hour one at the same density, and "20-30h" read as the peak of the
-           collection when the true peak is 5-10h.
-
-           The one point that is not a fixed width is the last, which is
-           open-ended, so the step up into it is a change of band width and not a
-           spike in the data. It is labelled "60+" for that reason. *@
+           One series, so no legend -- the heading names it, and a second colour
+           would encode nothing. No per-point labels: 193 of them is not a chart. *@
         @* Height covers plot AND the x-axis band, so the axis labels are not cut
            off into a nested scrollbar. *@
         <MudChart T="double"
-                  ChartType="ChartType.Line"
-                  ChartSeries="_bandSeries"
-                  ChartLabels="_bandLabels"
-                  ChartOptions="_bandOptions"
-                  Width="100%" Height="300px" />
+                  ChartType="ChartType.ScatterPlot"
+                  ChartSeries="_dotSeries"
+                  ChartOptions="_dotOptions"
+                  Width="100%" Height="320px" />
 
         <MudText Typo="Typo.caption" Align="Align.Center"
                  Class="mud-text-secondary d-block">
-            hours per game
+            games, sorted shortest to longest
         </MudText>
 
         @* The chart's table twin: every value on it is readable without hover. *@
@@ -161,53 +153,50 @@ else
     private List<TierRow>? _rows;
 
     private List<LengthBand> _bands = [];
-    private List<ChartSeries<double>> _bandSeries = [];
-    private string[] _bandLabels = [];
+    private List<ChartSeries<double>> _dotSeries = [];
     private int _bandTotal;
     private string _medianLabel = "";
-    private string _bandWidthLabel = "";
 
     /// <summary>
-    /// Bars are the theme primary, one colour for every bar. These bands are an
-    /// ordered scale, so a light-to-dark ramp across them would be defensible,
-    /// but MudBlazor's palette indexes by SERIES rather than by bar -- one series
-    /// gets one colour -- and per-bar shading would mean hand-drawing the chart.
-    /// The x-axis carries the ordering, which is where a reader looks for it.
+    /// Every dot is the theme primary. One series, so there is no identity to
+    /// encode with a second colour, and shading a dot by its own height would
+    /// spend the colour channel on what the height already says.
     ///
     /// The colour is a CSS variable rather than a literal so the chart follows
     /// MainLayout.Theme and dark mode without this page knowing either.
     /// </summary>
-    private readonly LineChartOptions _bandOptions = new()
+    private readonly ScatterPlotChartOptions _dotOptions = new()
     {
         ChartPalette = ["var(--mud-palette-primary)"],
-        // Horizontal rules only. Verticals would fence off each band and add
-        // nothing the x labels do not already say.
+        // Horizontal rules only; verticals across a rank axis mean nothing.
         XAxisLines = false,
         YAxisLines = true,
-        // Counts are whole games; a "12.5 games" tick would be nonsense.
-        YAxisFormat = "0",
-        YAxisTitle = "games",
+        YAxisTitle = "hours",
         // No XAxisTitle: MudBlazor renders it above the plot, where it reads as a
         // second heading contradicting the real one. The x label goes underneath
         // the chart as a caption instead.
         ShowLegend = false,
         ShowToolTips = true,
+        // 193 numbers printed on 193 dots is not a chart.
+        ShowDataLabels = false,
+        // Small enough that a cluster still reads as separate games rather than a
+        // solid block.
+        PointRadius = 3,
 
-        // Straight segments, never a spline. A spline invents curvature between
-        // two bands and can bow below the baseline, which would literally draw a
-        // negative number of games. ClampToZero is the belt to that braces.
-        InterpolationOption = InterpolationOption.Straight,
-        ClampToZero = true,
+        // A length axis starts at zero; a cropped baseline would exaggerate how
+        // steeply the collection climbs.
+        YAxisRequireZeroPoint = true,
+        // Without a cap MudBlazor draws a rule every 20h -- forty gridlines for a
+        // 718h range, which buries the dots in chrome.
+        MaxNumYAxisTicks = 8
 
-        // The ten measured counts, marked. The segments only join them -- there
-        // is no reading between two bands, and the markers are what keeps the
-        // line from being read as a continuous curve over hours.
-        ShowDataMarkers = true,
-        LineStrokeWidth = 2,
-
-        // A count axis must start at zero. Cropping the baseline would turn the
-        // hump around 20-30h into a cliff.
-        YAxisRequireZeroPoint = true
+        // A log y-axis was tried here and does not work: MudBlazor picks "nice"
+        // tick values in whatever space the data is in, so feeding it log10(hours)
+        // produced a tick at ~19 and a label of 10^19 hours. There is no log scale
+        // and no hook to place ticks, so the axis stays linear -- which means the
+        // single 718h game flattens the rest. That 718 is not a real length: it is
+        // (52.5 + 101.5 + 2000) / 3, and only one game in the collection has a
+        // completionist figure over 500. hours_main tops out at 109.
     };
 
     // Hiding the Hours column is not enough on its own -- a list ordered by
@@ -221,29 +210,26 @@ else
         Ui.Changed += Redraw;
         _rows = await Repo.GetTiersAsync();
 
-        _bands = await Repo.GetLengthBandsAsync();
+        // One (x, y) per unit: x is its place in the sorted pool, y its own hours.
+        // No aggregation at all -- this is every recorded value, which is the most
+        // resolution 193 games can carry.
+        var points = _rows
+            .Where(r => r.Hours > 0)
+            .OrderBy(r => r.Hours!.Value)
+            .Select((r, i) => ((double)(i + 1), (double)r.Hours!.Value))
+            .ToList();
 
-        // Axis ticks carry the band's lower edge only ("0", "5", "10" ... "60+").
-        // Thirteen full "0–5" style labels collide on a narrow screen, and since
-        // the bands are all one width the lower edge already identifies each one.
-        // The table twin below shows the full range.
-        _bandLabels = _bands
-            .Select(b => b.IsOpenEnded
-                ? $"{b.FromHours:0.#}+"
-                : $"{b.FromHours:0.#}")
-            .ToArray();
-        _bandSeries = [new ChartSeries<double>
+        _dotSeries = [new ChartSeries<double>
         {
             Name = "Games",
-            Data = new ChartData<double>(_bands.Select(b => (double)b.Units).ToArray())
+            Data = new ChartData<double>(points)
         }];
+
+        // The bands still back the table view: a 193-row table is not readable,
+        // and the point of a table twin is that values ARE readable.
+        _bands = await Repo.GetLengthBandsAsync();
         _bandTotal = _bands.Sum(b => b.Units);
         _medianLabel = MedianLabel();
-
-        // Read off the view rather than hardcoded, so changing the step in
-        // install.sql updates the caption with it.
-        var first = _bands.FirstOrDefault(b => !b.IsOpenEnded);
-        _bandWidthLabel = first is null ? "" : $"{first.ToHours!.Value - first.FromHours:0.#}-hour";
     }
 
     /// <summary>

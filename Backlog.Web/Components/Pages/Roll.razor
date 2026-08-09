@@ -26,8 +26,11 @@ else
             <MudSpacer />
             @* The chosen bounds are the user's own input, not a game's length,
                so they show regardless of the hours toggle -- nothing is given
-               away by echoing back what you just dragged. *@
-            <MudText Typo="Typo.subtitle1">@RangeLabel</MudText>
+               away by echoing back what you just dragged.
+
+               While a size is picked this says so instead, because the thumbs are
+               not what is filtering and showing their range would be a lie. *@
+            <MudText Typo="Typo.subtitle1">@FilterLabel</MudText>
         </div>
 
         @* Both thumbs run over INDEXES into Stops, not over hours: the pool spans
@@ -44,6 +47,37 @@ else
         <div class="d-flex justify-space-between">
             <MudText Typo="Typo.caption" Class="mud-text-secondary">@HoursLabel(0)</MudText>
             <MudText Typo="Typo.caption" Class="mud-text-secondary">no limit</MudText>
+        </div>
+
+        @* The other way in: the same short/medium/long thirds the database uses.
+           These are an ALTERNATIVE to the slider, not a narrowing of it -- picking
+           one ignores the thumbs entirely, and touching a thumb drops back to the
+           range. Two controls for one filter would otherwise quietly intersect,
+           and "short AND 40-60h" is a contradiction that reads as a bug.
+
+           The tier is passed to game_roll_range as a tier, never converted into
+           hour bounds: the boundaries are NTILE thirds that move as you finish
+           things, so a converted range would drift from what v_game_tiers says. *@
+        <div class="d-flex align-center flex-wrap gap-2 mt-3">
+            <MudText Typo="Typo.overline">Or a size</MudText>
+
+            @foreach (var (tier, name) in Tiers)
+            {
+                var on = _tier == tier;
+                <MudChip T="string"
+                         Variant="@(on ? Variant.Filled : Variant.Outlined)"
+                         Color="@(on ? Color.Primary : Color.Default)"
+                         Size="Size.Small"
+                         OnClick="@(() => ToggleTier(tier))">
+                    @name <span class="mud-text-disabled ml-1">@CountInTier(tier)</span>
+                </MudChip>
+            }
+
+            @if (_tier is not null)
+            {
+                <MudChip T="string" Variant="Variant.Text" Size="Size.Small"
+                         OnClick="@(() => ToggleTier(null))">use the slider</MudChip>
+            }
         </div>
 
         <div class="d-flex align-center flex-wrap gap-2 mt-3">
@@ -96,7 +130,7 @@ else
     @if (_matching.Count == 0)
     {
         <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">
-            Nothing in that range@(_activeTags.Count > 0 ? " with those tags" : "").
+            Nothing @(_tier is null ? "in that range" : "in that size")@(_activeTags.Count > 0 ? " with those tags" : "").
             Widen it and the count moves.
         </MudAlert>
     }
@@ -215,9 +249,19 @@ else
         0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200
     ];
 
+    /// <summary>The database's own thirds, by tier number.</summary>
+    private static readonly (int Tier, string Name)[] Tiers =
+        [(1, "short"), (2, "medium"), (3, "long")];
+
     private int _minIdx;
     private int _maxIdx = Stops.Count;   // starts at "no limit", so the first
                                          // view of the page is the whole pool
+
+    /// <summary>
+    /// Which third is selected, or null to filter by the slider instead. The two
+    /// are mutually exclusive: see the note beside the size chips.
+    /// </summary>
+    private int? _tier;
 
     private List<RollUnit>? _pool;
     private List<string> _tags = [];
@@ -256,6 +300,15 @@ else
             var (lo, hi)   => $"{lo:0.#}h – {hi:0.#}h"
         };
 
+    /// <summary>
+    /// What is actually filtering. Naming the tier rather than the thumbs while a
+    /// size is picked, because the thumbs are not being consulted.
+    /// </summary>
+    private string FilterLabel =>
+        _tier is null
+            ? RangeLabel
+            : Tiers.First(t => t.Tier == _tier).Name + " third";
+
     private IEnumerable<RollUnit> PoolListing => Ui.ShowHours
         ? _matching.OrderBy(u => u.Hours)
         : _matching.OrderBy(u => u.UnitName, StringComparer.CurrentCultureIgnoreCase);
@@ -288,6 +341,10 @@ else
         // Dragging one thumb past the other pushes it rather than refusing to
         // move, which is what a real range control does.
         if (_minIdx > _maxIdx) _maxIdx = _minIdx;
+
+        // Touching a thumb means you want a range, so the size picker steps aside
+        // rather than the two silently intersecting.
+        _tier = null;
         Recount();
     }
 
@@ -295,6 +352,14 @@ else
     {
         _maxIdx = value;
         if (_maxIdx < _minIdx) _minIdx = _maxIdx;
+        _tier = null;
+        Recount();
+    }
+
+    /// <summary>Picks a third, or clears back to the slider when already on it.</summary>
+    private void ToggleTier(int? tier)
+    {
+        _tier = _tier == tier ? null : tier;
         Recount();
     }
 
@@ -311,12 +376,27 @@ else
     }
 
     private void Recount() =>
-        _matching = _entries.Where(e => Matches(e, _activeTags)).Select(e => e.Unit).ToList();
+        _matching = _entries
+            .Where(e => Matches(e, _activeTags, _tier))
+            .Select(e => e.Unit)
+            .ToList();
 
-    private bool Matches(Entry e, HashSet<string> wantTags)
+    /// <summary>
+    /// Mirrors game_roll_range: a tier REPLACES the hour bounds rather than
+    /// narrowing them, so the count on screen matches what the roll will draw
+    /// from. If these two ever disagree the number beside the button is a lie.
+    /// </summary>
+    private bool Matches(Entry e, HashSet<string> wantTags, int? tier)
     {
-        if (e.Unit.Hours < MinHours) return false;
-        if (MaxHours is { } max && e.Unit.Hours > max) return false;
+        if (tier is null)
+        {
+            if (e.Unit.Hours < MinHours) return false;
+            if (MaxHours is { } max && e.Unit.Hours > max) return false;
+        }
+        else if (e.Unit.Tier != tier)
+        {
+            return false;
+        }
 
         // AND, not OR -- matching game_by_tag(), game_roll() and the play-order
         // screen. Picking PC + co-op means both.
@@ -327,8 +407,15 @@ else
     private int CountWith(string tag, bool alreadyOn)
     {
         var want = alreadyOn ? _activeTags : new HashSet<string>(_activeTags) { tag };
-        return _entries.Count(e => Matches(e, want));
+        return _entries.Count(e => Matches(e, want, _tier));
     }
+
+    /// <summary>
+    /// How many games picking this size would give, with the current tags still
+    /// applied — so a dead-end combination reads 0 before you click it.
+    /// </summary>
+    private int CountInTier(int tier) =>
+        _entries.Count(e => Matches(e, _activeTags, tier));
 
     private async Task RollAsync()
     {
@@ -337,10 +424,12 @@ else
         {
             _result = await Repo.RollRangeAsync(
                 // An open bottom and 0 are the same pool; send NULL so the
-                // function does the trivial thing.
+                // function does the trivial thing. Both bounds are ignored anyway
+                // when a tier is set -- passing them keeps this call site simple.
                 MinHours == 0 ? null : MinHours,
                 MaxHours,
-                _activeTags);
+                _activeTags,
+                _tier);
 
             if (_result is null)
             {

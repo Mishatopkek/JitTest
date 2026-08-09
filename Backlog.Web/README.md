@@ -31,25 +31,34 @@ views and functions it defines.
 
 ### `/sizes`
 
-The line chart at the top answers the one question three equal thirds
-structurally cannot: is what's left mostly quick hits or mostly monsters? Thirds
-are always a third each; the bands show the real shape. It reads
-`custom.v_game_length_bands` — the band edges live in that view, never in C#, so
-the chart and the roll can't disagree about where a band starts.
+The scatter at the top is **one dot per playable unit** — all 193, sorted shortest
+to longest, y being that unit's own recorded hours. No bucketing at all, which is
+as much resolution as 193 games carry. It is built from `GetTiersAsync`, which the
+page already loads, so it costs no extra query.
 
-**Bands are equal 5-hour steps to 60, plus one open-ended `60+`** — 13 points. The
-uniform width is the important part, and it was not the first attempt: bands that
-widened to the right kept every band populated but made bin width read as signal,
-so `20–30h` showed 38 games and looked like the peak of the collection. At uniform
-width the real peak is `5–10h`. Now a taller point just means more games, and the
-slope between two points is a real rate.
+**Known limitation, and it is data, not the chart.** The y-axis is linear because
+MudBlazor has no log scale and faking one does not work (see below), so the single
+718h entry flattens the other 192 into the lower fifth of the plot. That 718 is not
+a length anyone would recognise: `hours_average` is the mean of `hours_main`,
+`hours_main_extra` and `hours_completionist`, and for `Age of Wonders: Planetfall`
+that is `(52.5 + 101.5 + 2000) / 3`. Exactly one game in the collection has a
+completionist figure over 500. `hours_main` tops out at 109 and `hours_main_extra`
+at 116 — either would plot cleanly on a linear axis. Fixing that one row, or
+basing the chart on a single hours column instead of the three-way average, would
+un-squash it; both are data decisions rather than chart ones.
 
-`60+` is the one point that is not a fixed width, so the step up into it is a
-change of band width rather than a spike in the data — hence the label.
+**A log y-axis was tried and reverted.** MudBlazor chooses "nice" tick values in
+whatever space the data arrives in, so feeding it `log10(hours)` and inverting the
+labels through `YAxisToStringFunc` produced a tick at ~19 and an axis label of
+10^19 hours. There is no log scale and no hook for placing ticks.
 
-Axis ticks show each band's **lower edge only** (`0, 5, 10 … 60+`). Thirteen full
-`0–5` style labels collide on a phone, and since the bands are one width the lower
-edge identifies each one; the table twin carries the full ranges.
+`MaxNumYAxisTicks` is capped: left alone, a 718h range draws a rule every 20h and
+forty gridlines bury the dots.
+
+The **table view** below the chart is still the equal-5-hour-band summary from
+`custom.v_game_length_bands`. That is deliberate — a 193-row table is not readable,
+and the point of a table twin is that the values *are* readable. The chart carries
+the detail, the table the summary.
 
 Conventions it follows, and that any chart added here should:
 
@@ -90,6 +99,21 @@ hover with a real pointer.
 One track with two thumbs sets the minimum and maximum length, the tag chips
 narrow it further, and the number beside the button is how many games currently
 fit — recomputed as you drag.
+
+**Or pick a size instead.** `short` / `medium` / `long` chips sit under the slider
+and filter by the same `NTILE(3)` thirds the database uses, so they hit exactly the
+rows `v_game_tiers` says they should. The two are **alternatives, not a filter you
+narrow twice**: picking a size makes the thumbs irrelevant (the readout says
+"medium third" rather than pretending the range is doing the work), and touching a
+thumb clears the size. Honouring both would quietly intersect them, and "short AND
+40–60h" is a contradiction that reads as a bug.
+
+The tier is handed to `game_roll_range` **as a tier**, never converted into hour
+bounds. `NTILE` boundaries move as you finish things and are rounded for display,
+so a converted range would drift from the tier it claims to be. `Matches()` on the
+page mirrors the same precedence, which is what keeps the live count equal to what
+the roll actually draws from. Size chips carry their count with the current tags
+applied, so a dead end reads `0` before you click it.
 
 The thumbs move over **indexes into a fixed list of detents**
 (`0,1,2,…,20,30,40,60,100,150,200,∞`) rather than over hours. The playable pool

@@ -275,10 +275,25 @@ behind an unfinished predecessor, so there is never a series head to be sent
 back to. That is what makes the range trustworthy: unlike `game_roll`, the hours
 and the tags hold for the game you are actually told to start.
 
-`v_roll_pool` is the single definition of that pool. `v_game_tiers` is built on
-top of it rather than restating its `WHERE` clause, so the buckets can never
-bucket a different set of games than the roll draws from, and the live count on
-`/roll` counts the same rows.
+`v_roll_pool` is the single definition of that pool, and it now carries the
+`NTILE(3)` tier as well, so one row of it is everything the roll screen needs about
+a unit: its length, its tags and its size. `v_game_tiers` is a thin projection over
+it rather than a second `NTILE`, so the buckets can never bucket a different set of
+games than the roll draws from, and the live count on `/roll` counts the same rows.
+
+**`p_tier` is the alternative to a range**, not a narrowing of it: pass `1`, `2` or
+`3` and the hour bounds are ignored entirely.
+
+```sql
+SELECT * FROM custom.game_roll_range(NULL, NULL, NULL, 2);            -- a medium one
+SELECT * FROM custom.game_roll_range(NULL, NULL, ARRAY['PC'], 3);     -- a long PC one
+SELECT * FROM custom.game_roll_range(500, 600, NULL, 1);              -- tier wins; bounds ignored
+```
+
+It takes a tier rather than hour bounds derived from one because the boundaries are
+thirds that shift as you finish things, and `v_game_tier_stats` rounds them for
+display — converting would drift from the tier it claims to be. A tier outside
+1–3 raises.
 
 By the same token `game_roll`'s own redirect branch is, in practice,
 unreachable — it joins `v_game_tiers`, which is also playable-only. It is left
@@ -368,13 +383,16 @@ for a game that has them. It used to read from a cache filled only for
 *expanded* rows — editing a collapsed split showed an empty box, and confirming
 read as "no parts" and wiped the split.
 
-#### The distribution chart on /sizes
+#### The distribution on /sizes
 
-`custom.v_game_length_bands` counts the startable pool into **equal 5-hour bands
-from 0 to 60, plus one open-ended `60+`** — 13 points — and `/sizes` plots it as a
-line with a marker per band. It answers what three equal thirds cannot: whether
-what's left is mostly quick hits or mostly monsters. Thirds are always a third
-each.
+The **chart** is one dot per playable unit — all 193, sorted shortest to longest,
+no bucketing at all. It answers what three equal thirds cannot: whether what's left
+is mostly quick hits or mostly monsters. Thirds are always a third each.
+
+`custom.v_game_length_bands` counts the same pool into **equal 5-hour bands from 0
+to 60, plus one open-ended `60+`** — 13 points — and now backs the **table** beneath
+that chart. A 193-row table is not readable, and a table view exists so values *are*
+readable, so the chart carries the detail and the bands the summary.
 
 ```sql
 SELECT label, from_hours, to_hours, units, band_hours
@@ -425,6 +443,12 @@ different set of games than the roll draws from.
 `/roll` is the range roll with a UI on it. One track with two thumbs sets the
 bounds, the tag chips narrow it further (ANDed, as everywhere else), and the count
 next to the button updates as you drag.
+
+Under the slider sit `short` / `medium` / `long` chips — the same thirds
+`v_game_tiers` defines, passed straight through as `game_roll_range`'s `p_tier`.
+They are an **alternative** to the slider: picking one ignores the thumbs and
+touching a thumb clears the size, because honouring both would silently intersect
+them.
 
 The thumbs run over **indexes into a fixed list of detents**
 (`0,1,2,…,20,30,40,60,100,150,200,∞`), not over hours directly. The playable pool

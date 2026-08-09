@@ -44,11 +44,11 @@ Key objects:
 |---|---|
 | `v_game_unit` / `v_unit` | one row per *playable unit*; the grain everything else works at |
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
-| `v_roll_pool` | the units you can start right now, with tags; **the one definition of the rollable pool** |
-| `v_game_tiers` | `v_roll_pool` bucketed short/medium/long by `NTILE(3)` |
-| `v_game_length_bands` | `v_roll_pool` counted into fixed hour bands — the distribution `/sizes` plots |
+| `v_roll_pool` | units you can start right now, with tags **and their short/medium/long tier**; the one definition of the rollable pool |
+| `v_game_tiers` | thin projection of `v_roll_pool` — the `NTILE(3)` itself lives there now |
+| `v_game_length_bands` | `v_roll_pool` counted into equal hour bands — backs the table on `/sizes` |
 | `game_roll()` | rolls by bucket; redirects to a series head |
-| `game_roll_range()` | rolls by an hours range + tags; no redirect needed — see rule 10 |
+| `game_roll_range()` | rolls by an hours range **or** a tier, plus tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
 
 ## Domain rules that are easy to break
@@ -99,9 +99,17 @@ way. The drawn game's actual hours stay behind the flag.
 every pixel of a drag, so a query per event would be a round trip per pixel.
 Tags are pre-lowercased at load for the same reason.
 
-**Charts come from `MudChart`, and the bands come from the database.** The
-distribution on `/sizes` reads `v_game_length_bands`; band edges are never
-recomputed in C#. Conventions that chart follows, and any new one should:
+**`/roll` has two filters and they are mutually exclusive.** The hours slider and
+the short/medium/long chips are alternatives, not a filter you narrow twice:
+picking a size ignores the thumbs, and touching a thumb clears the size. Honouring
+both would silently intersect them, and "short AND 40–60h" reads as a bug. The
+tier goes to `game_roll_range` **as a tier**, never converted to hour bounds —
+`NTILE` boundaries move as you finish things, so a converted range would drift
+from what `v_game_tiers` says. `Matches()` on the page mirrors that precedence; if
+the two disagree, the count beside the button is a lie.
+
+**Charts come from `MudChart`, and aggregates come from the database.**
+Conventions the `/sizes` chart follows, and any new one should:
 
 - **One series → one colour and no legend.** The heading names the series. Never
   shade a mark by its own value — its length or height already encodes it.
@@ -124,8 +132,15 @@ recomputed in C#. Conventions that chart follows, and any new one should:
 - **Histogram bands must be equal width.** A band twice as wide collects twice the
   games at the same density, so unequal bands make bin width read as signal — that
   bug had `/sizes` showing a peak at `20–30h` that does not exist. Uniform steps
-  also make the line's slope a real rate. Put the tail in one clearly-labelled
-  open-ended band rather than widening the others.
+  also make a line's slope a real rate. Put the tail in one clearly-labelled
+  open-ended band rather than widening the others. (`v_game_length_bands` still
+  does this, and now backs the table view rather than the chart.)
+- **There is no log axis, and faking one does not work.** MudBlazor picks "nice"
+  tick values in whatever space the data arrives in, so plotting `log10(hours)`
+  and inverting the labels via `YAxisToStringFunc` produced a tick at ~19 and a
+  label of 10^19 hours. There is no hook to place ticks, so any hours axis is
+  linear — which matters because one game at 718h flattens the other 192. Cap
+  `MaxNumYAxisTicks`; without it a 718h range draws forty gridlines.
 - **Synthetic mouse events do not reliably drive MudBlazor chart tooltips**, the
   same way they do not drive its drag. Verify hover with a real pointer, or lean
   on the table twin.
