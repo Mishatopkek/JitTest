@@ -239,7 +239,7 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
     {
         await using var cmd = db.CreateCommand(
             """
-            SELECT label, from_hours, to_hours, units, band_hours
+            SELECT label, from_hours, to_hours, units, smoothed_units, band_hours
             FROM custom.v_game_length_bands
             ORDER BY ord
             """);
@@ -254,9 +254,10 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
                 reader.GetDecimal(1),
                 // NULL on the open-ended tail band.
                 reader.IsDBNull(2) ? null : reader.GetDecimal(2),
-                // count(*), so bigint on the wire.
+                // count(*), so bigint on the wire; the rolling sum of it likewise.
                 (int)reader.GetInt64(3),
-                reader.GetDecimal(4)));
+                (int)reader.GetInt64(4),
+                reader.GetDecimal(5)));
         }
 
         return bands;

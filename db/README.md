@@ -386,14 +386,32 @@ read as "no parts" and wiped the split.
 #### The distribution on /sizes
 
 `custom.v_game_length_bands` counts the startable pool **one hour at a time up to
-60, plus one open-ended `60+`** — 61 rows — and `/sizes` plots it as a marker per
-hour. It answers what three equal thirds cannot: whether what's left is mostly quick
-hits or mostly monsters. Thirds are always a third each.
+200, plus one open-ended `200+`** — 201 rows — and `/sizes` plots it as a smooth
+curve. It answers what three equal thirds cannot: whether what's left is mostly
+quick hits or mostly monsters. Thirds are always a third each.
 
-The chart plots the 60 fixed-width bands and **skips the `60+` row**: that band is
-658 hours wide against neighbours of one, so it would spike on width rather than on
-data and flatten everything else. The page names its count in the caption and the
-table lists all 61 rows, so nothing is hidden.
+Two columns matter:
+
+- `units` — the raw count in that one hour.
+- `smoothed_units` — a **centred five-band rolling sum**: how many games sit within
+  two hours either side. This is what the chart plots. Raw one-hour counts over ~200
+  games average under one and jump between 0 and 10, which is sampling noise rather
+  than shape; the window makes it readable without inventing values, since every
+  input is a real count and the window is a fixed five hours wide everywhere.
+
+Bands stay **uniformly one hour wide right through the sparse tail** rather than
+widening past 60h. Unequal widths make bin width read as signal — a five-hour band
+collects five times the games of a one-hour band at the same density, so a widening
+tail would rise merely for being coarser. Smoothing buys the legibility instead.
+
+The `PARTITION BY (hi IS NULL)` in the window keeps the open-ended band out of its
+neighbours' sums and out of its own: it is 500+ hours wide, so folding it into a
+five-hour total would be adding unlike things. It smooths to its own raw count, and
+the chart does not plot it at all.
+
+200 hours costs exactly one unit — the 718h entry, itself an artefact of averaging in
+a 2000h completionist figure. Edge effect: the first and last two bands see a clipped
+window and read slightly low.
 
 ```sql
 SELECT label, from_hours, to_hours, units, band_hours

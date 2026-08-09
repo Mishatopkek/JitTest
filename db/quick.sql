@@ -14,7 +14,7 @@ SET search_path TO custom, public;
 -- SELECT id, game_name, finished, notes FROM custom.game_search('Homeworld');
 
 SELECT id, game_name, finished, notes, tags, priority, series, series_slot FROM custom.game_info('Border');
-SELECT * FROM custom.game_add('Tiny Tina''s Wonderlands', 16, 29, 52
+SELECT * FROM custom.game_add('Borderlands 4', 30.5, 50.5, 111
     , '');
 
 
@@ -85,12 +85,19 @@ SELECT * FROM custom.game_roll_range(NULL, NULL, ARRAY['PC'], 3);   -- a long PC
 SELECT * FROM custom.game_roll_range(500, 600, NULL, 2);            -- tier wins
 
 -- The shape of what is left: how many startable games sit in each length band.
--- One hour per band up to 60, then one open-ended 60+. This is what the chart at
--- the top of /sizes draws, minus that last band -- it is 658h wide, so plotting it
--- beside 1h bands would spike on width rather than on data. Three equal thirds
--- cannot tell you whether the backlog is mostly quick hits or mostly monsters;
--- this can.
-SELECT label, units, band_hours FROM custom.v_game_length_bands ORDER BY ord;
+-- One hour per band up to 200, then one open-ended 200+. Three equal thirds cannot
+-- tell you whether the backlog is mostly quick hits or mostly monsters; this can.
+--
+-- units is the raw count for that hour; smoothed_units is a centred five-hour
+-- rolling sum -- how many sit within two hours either side -- and is what the chart
+-- at the top of /sizes plots. Raw 1h counts are mostly 0s and 1s at this scale.
+-- The chart skips the 200+ row: it is 500h+ wide, so it would spike on width.
+SELECT label, units, smoothed_units, band_hours
+FROM custom.v_game_length_bands ORDER BY ord;
+
+-- Only the hours that actually hold something -- the shape without the zeroes.
+SELECT label, units, smoothed_units FROM custom.v_game_length_bands
+WHERE units > 0 ORDER BY ord;
 
 -- Sanity check after changing the band step: these two must agree, or a band is
 -- double-counting or dropping games.

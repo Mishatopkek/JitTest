@@ -483,45 +483,70 @@ ORDER BY tier;
 -- as signal. With uniform steps a taller point means more games, full stop, and
 -- the slope of the line between two points is a real rate.
 --
--- ONE hour per band up to 60, then a single open-ended band: 61 points, which is
--- about as fine as 193 games go. Twelve of those bands come out empty and the
--- tallest holds nine, so the curve is spiky rather than smooth -- that is the
--- honest picture at this resolution, and an empty band means there is genuinely no
--- game that long, not a gap in the chart.
+-- ONE hour per band all the way to 200, then a single open-ended band: 201 rows.
+-- 200 hours covers all but one unit -- only the 718h entry falls past it, and that
+-- number is an artefact of averaging in a 2000h completionist figure.
 --
--- Cap at 60 rather than further out because past it the pool is 0-1 games per hour:
--- extending to 100 would add forty more points, forty-three of them empty. The tail
--- collapses into 60+ instead. That last band is not 1h wide and will read as a step
--- up; it is labelled so, and the table gives its real count.
+-- Uniform 1-hour bands the whole way, deliberately, rather than widening them in
+-- the sparse tail. Unequal widths make bin width read as signal: a 5-hour band
+-- collects five times the games of a 1-hour band at the same density, so the tail
+-- would rise just for being coarser. Smoothing is what makes a fine, uniform grid
+-- readable -- see smoothed_units below -- so the width never has to change.
+--
+-- smoothed_units is a centred five-band rolling sum: how many games sit within two
+-- hours either side. Raw one-hour counts over ~200 games average well under one and
+-- jump between 0 and 9, which is sampling noise rather than shape; the window turns
+-- that into a curve without inventing any values, because every input is a real
+-- count. It is comparable across the whole axis because the window is a fixed five
+-- hours wide everywhere.
+--
+-- The PARTITION keeps the open-ended band out of its neighbours' windows and out of
+-- its own: it is 500+ hours wide, so mixing it into a five-hour sum would be adding
+-- unlike things. It ends up smoothed to its own raw count.
+--
+-- Edge effect worth knowing: the first two and last two fixed bands see a clipped
+-- window, so they read slightly low. At the left that covers 0-2h, which holds a
+-- handful of games.
 --
 -- LEFT JOIN, not an inner one: an empty band must still return its row. Dropping
 -- it would close the gap on the chart's x-axis and misdescribe the distribution.
 DROP VIEW IF EXISTS custom.v_game_length_bands;
 CREATE VIEW custom.v_game_length_bands AS
 WITH band AS (
-    SELECT g::numeric                                    AS lo,
-           CASE WHEN g < 60 THEN (g + 1)::numeric END    AS hi
-    FROM generate_series(0, 60, 1) AS g
+    SELECT g::numeric                                     AS lo,
+           CASE WHEN g < 200 THEN (g + 1)::numeric END    AS hi
+    FROM generate_series(0, 200, 1) AS g
+), counted AS (
+    SELECT b.lo,
+           b.hi,
+           count(r.game_id)                               AS units,
+           round(coalesce(sum(r.hours), 0)::numeric, 1)   AS band_hours
+    FROM band b
+    LEFT JOIN custom.v_roll_pool r
+           ON r.hours >= b.lo
+          AND (b.hi IS NULL OR r.hours < b.hi)
+    GROUP BY b.lo, b.hi
 )
-SELECT (row_number() OVER (ORDER BY b.lo))::int          AS ord,
-       CASE WHEN b.hi IS NULL
-            THEN b.lo::text || '+'
-            ELSE b.lo::text || '–' || b.hi::text
-       END                                               AS label,
-       b.lo                                              AS from_hours,
-       b.hi                                              AS to_hours,
-       count(r.game_id)                                  AS units,
-       round(coalesce(sum(r.hours), 0)::numeric, 1)      AS band_hours
-FROM band b
-LEFT JOIN custom.v_roll_pool r
-       ON r.hours >= b.lo
-      AND (b.hi IS NULL OR r.hours < b.hi)
-GROUP BY b.lo, b.hi
-ORDER BY b.lo;
+SELECT (row_number() OVER (ORDER BY c.lo))::int           AS ord,
+       CASE WHEN c.hi IS NULL
+            THEN c.lo::text || '+'
+            ELSE c.lo::text || '–' || c.hi::text
+       END                                                AS label,
+       c.lo                                               AS from_hours,
+       c.hi                                               AS to_hours,
+       c.units,
+       sum(c.units) OVER (PARTITION BY (c.hi IS NULL)
+                          ORDER BY c.lo
+                          ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING)
+                                                          AS smoothed_units,
+       c.band_hours
+FROM counted c
+ORDER BY c.lo;
 
 COMMENT ON VIEW custom.v_game_length_bands IS
-    'Distribution of the startable pool across length bands -- the shape of the '
-    'backlog. Half-open bands, empty ones included, top band open-ended.';
+    'Distribution of the startable pool across uniform one-hour bands to 200, plus '
+    'an open-ended tail. units is the raw count; smoothed_units is a centred '
+    'five-hour rolling sum, which is what /sizes plots.';
 
 
 -- Exact duplicates: same name once punctuation, spacing and case are stripped.

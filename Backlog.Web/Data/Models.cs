@@ -90,6 +90,7 @@ public sealed record LengthBand(
     decimal FromHours,
     decimal? ToHours,
     int Units,
+    int SmoothedUnits,
     decimal BandHours)
 {
     /// <summary>True for the open-ended tail band, which is not a fixed width.</summary>

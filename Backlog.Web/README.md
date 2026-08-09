@@ -31,37 +31,46 @@ views and functions it defines.
 
 ### `/sizes`
 
-The chart at the top counts the startable pool **hour by hour**: x is length, y is
-how many games are that long, one marker per hour up to 60. It reads
-`custom.v_game_length_bands`, so the band edges live in that view and never in C#.
+The chart at the top counts the startable pool **hour by hour, from 0 to 200**: x is
+length, y is how many games sit within two hours either side of it. It reads
+`custom.v_game_length_bands`, so the band edges and the smoothing live in that view
+and never in C#.
 
-**Every plotted band is exactly one hour wide**, which is what makes the chart
-honest — a band twice as wide collects twice the games at the same density, so
-unequal widths make bin width read as signal. An earlier version had bands widening
-to the right and showed a peak at `20–30h` that does not exist.
+**The curve is smoothed, not interpolated.** Each point is the view's centred
+five-hour rolling sum of the raw one-hour counts. Raw counts at this resolution
+average well under one game per hour and jump between 0 and 10 — sampling noise
+rather than shape — so the window makes it legible without inventing anything:
+every input is a real count, and the window is a fixed five hours wide everywhere,
+so points are comparable right across the axis. Markers are off; with 200 points
+they were a bead curtain, and the tooltip and table still carry the numbers.
 
-At this resolution the curve is spiky and touches zero in about a dozen places.
-That is the true shape, not noise in the drawing: an empty point means no game is
-that long.
+**Every plotted band is exactly one hour wide, including through the sparse tail.**
+Widening bands past 60h — the obvious way to fill the tail — would have made bin
+width read as signal: a five-hour band collects five times the games of a one-hour
+band at the same density, so the tail would rise merely for being coarser. An
+earlier version of this chart had widening bands and showed a peak at `20–30h` that
+does not exist. Smoothing is what buys legibility instead, so the width never
+changes.
 
-**The open-ended `60+` band is deliberately left off the chart.** It is 658 hours
-wide against neighbours of one, so it collects ~20 games where the tallest real
-hour holds 9 — a spike caused by its width, not by the data, and tall enough to
-squash everything else. The caption names its count and the table lists it, so
-nothing is hidden, only moved. Bands are capped at 60 because past there the pool
-runs 0–1 games per hour; extending to 100 would add forty points, forty-three of
-them empty.
+**200 hours is the cap and it costs exactly one unit** — the 718h entry, which is
+itself an artefact of averaging in a 2000h completionist figure. It appears in the
+table as `200+`, and the caption names it. The open-ended band is not plotted, since
+it is 500+ hours wide and so not a comparable reading.
 
-Axis ticks name **every fifth hour**; the rest are blank strings. Sixty labels
-overprint into a smear, and MudBlazor still spaces the points evenly — the blanks
-remove text, never a reading.
+Axis ticks name **every twentieth hour**; the rest are blank strings. MudBlazor
+still spaces the points evenly, so a blank removes text, never a reading.
 
-`YAxisTicks = 2` matters: left alone MudBlazor picks an interval of 20 for a range
-that only reaches 9, squeezing the curve into the bottom half of the plot.
-`MaxNumYAxisTicks` on its own did not shift it.
+`YAxisTicks` is what moves the y-axis — `MaxNumYAxisTicks` alone did nothing. Left
+to itself MudBlazor picked an interval of 20 for a range reaching 9 and squeezed the
+curve into the bottom half of the plot.
 
-The **table view** below carries all 61 bands including `60+`, so every value is
-readable without hover.
+The **table view** lists every hour that actually holds a game (~67 of the 201
+bands) with both the raw count and the smoothed figure plotted at it, plus the
+`200+` row. Empty hours are omitted: their reading is "none", which the curve
+already shows, and 201 mostly-blank rows are not a table anyone reads.
+
+**Edge effect worth knowing:** the first and last two bands see a clipped window, so
+they read slightly low. At the left that covers 0–2h, which holds a handful of games.
 
 Conventions it follows, and that any chart added here should:
 

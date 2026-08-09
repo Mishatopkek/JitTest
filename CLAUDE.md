@@ -46,7 +46,7 @@ Key objects:
 | `v_game` | one row per owned game, with tags, series slot, blocking, parts |
 | `v_roll_pool` | units you can start right now, with tags **and their short/medium/long tier**; the one definition of the rollable pool |
 | `v_game_tiers` | thin projection of `v_roll_pool` — the `NTILE(3)` itself lives there now |
-| `v_game_length_bands` | `v_roll_pool` counted into equal 1-hour bands to 60 + a `60+` tail — the distribution `/sizes` plots |
+| `v_game_length_bands` | `v_roll_pool` counted into equal 1-hour bands to 200 + a `200+` tail, with a smoothed column — the distribution `/sizes` plots |
 | `game_roll()` | rolls by bucket; redirects to a series head |
 | `game_roll_range()` | rolls by an hours range **or** a tier, plus tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
@@ -132,10 +132,14 @@ Conventions the `/sizes` chart follows, and any new one should:
 - **Histogram bands must be equal width, and the plot must only show equal-width
   bands.** A band twice as wide collects twice the games at the same density, so
   unequal widths make bin width read as signal — that bug had `/sizes` showing a
-  peak at `20–30h` that does not exist. The open-ended tail band is the same trap
-  at the end of the axis: at 1-hour steps `60+` is 658 hours wide and spikes above
-  every real point, so the chart plots only the fixed-width bands and names the
-  tail's count in the caption instead. The table view still lists every band.
+  peak at `20–30h` that does not exist. The open-ended tail band is the same trap at
+  the end of the axis, so the chart plots only fixed-width bands and names the tail's
+  count in the caption instead.
+- **Smooth a sparse distribution with a rolling window, never by widening bands or
+  splining.** `v_game_length_bands.smoothed_units` is a centred five-band rolling
+  sum, so every plotted value is a real count and the window is the same width right
+  across the axis. Widening the bands in the tail would reintroduce the bin-width
+  bug; a spline would invent values between them.
 - `YAxisTicks` is the knob that controls tick spacing; `MaxNumYAxisTicks` alone did
   nothing. Without it MudBlazor picked an interval of 20 for a range reaching 9 and
   squashed the curve into the bottom half of the plot.

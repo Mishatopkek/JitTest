@@ -38,9 +38,13 @@ else
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudText Typo="Typo.subtitle2">Games you can start, by length</MudText>
         <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2">
-            @_bandTotal playable units, counted hour by hour — half sit under
-            @_medianLabel. @_overflow are longer than @_capLabel and run off the
-            right of this chart; the table below has them.
+            @_bandTotal playable units. Each point is how many sit within two hours
+            either side of that length, so the curve is smoothed but every value is
+            a real count — half the collection is under @_medianLabel.
+            @if (_overflow > 0)
+            {
+                @($"{_overflow} longer than {_capLabel} run off the right; the table has them.")
+            }
         </MudText>
 
         @* One point per hour of length, so 61 of them: y is how many games are
@@ -67,23 +71,31 @@ else
             hours per game
         </MudText>
 
-        @* The chart's table twin: every value on it is readable without hover. *@
+        @* The chart's table twin, so no value is reachable only by hovering.
+
+           Only hours that actually hold a game are listed. All 201 bands would be
+           mostly empty rows -- and an empty band's reading is already "none", which
+           the chart shows. Both columns the chart uses are here: the raw count for
+           that hour and the smoothed figure plotted at it. *@
         <MudExpansionPanels Elevation="0" Class="mt-2">
-            <MudExpansionPanel Text="Show as a table" Dense="true">
+            <MudExpansionPanel Text="@($"Show as a table ({_occupied.Count} lengths with games)")"
+                               Dense="true">
                 <MudSimpleTable Dense="true" Hover="true" Elevation="0">
                     <thead>
                         <tr>
                             <th>Length (hours)</th>
                             <th style="text-align:right">Games</th>
+                            <th style="text-align:right">Within ±2h</th>
                             <th style="text-align:right">Hours in band</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var band in _bands)
+                        @foreach (var band in _occupied)
                         {
                             <tr>
                                 <td>@band.Label</td>
                                 <td style="text-align:right">@band.Units</td>
+                                <td style="text-align:right">@band.SmoothedUnits</td>
                                 <td style="text-align:right">@band.BandHours.ToString("0.#")</td>
                             </tr>
                         }
@@ -166,6 +178,9 @@ else
     private string _capLabel = "";
     private int _overflow;
 
+    /// <summary>Bands holding at least one game — what the table lists.</summary>
+    private List<LengthBand> _occupied = [];
+
     /// <summary>
     /// One colour for every marker. One series, so there is no identity to encode
     /// with a second, and shading a point by its own height would spend the colour
@@ -196,19 +211,20 @@ else
         InterpolationOption = InterpolationOption.Straight,
         ClampToZero = true,
 
-        // The measured counts, marked. With 61 points the markers are what make it
-        // read as one dot per hour rather than a single squiggle.
-        ShowDataMarkers = true,
+        // Markers off: 200 of them would be a bead curtain, and the point of the
+        // smoothing is that this reads as a curve. The tooltip still gives the
+        // value at each hour, and the table lists them.
+        ShowDataMarkers = false,
         LineStrokeWidth = 2,
 
         // A count axis must start at zero, or the spikes read as far bigger than
         // the nine games they actually are.
         YAxisRequireZeroPoint = true,
-        // Left alone MudBlazor picks a tick interval of 20 for a range that only
-        // reaches 9, which squeezes the curve into the bottom half of the plot.
-        // MaxNumYAxisTicks alone did not shift it; the interval is what does.
-        YAxisTicks = 2,
-        MaxNumYAxisTicks = 8
+        // YAxisTicks is the interval, and it is what actually moves the axis --
+        // MaxNumYAxisTicks alone did nothing. Smoothed values reach the high
+        // thirties, so five is about right.
+        YAxisTicks = 5,
+        MaxNumYAxisTicks = 10
     };
 
     // Hiding the Hours column is not enough on its own -- a list ordered by
@@ -224,29 +240,31 @@ else
 
         _bands = await Repo.GetLengthBandsAsync();
 
-        // The open-ended tail band is left OFF the chart on purpose. Every other
-        // point covers exactly one hour; that one covers 658, so it collects 19
-        // games where the tallest real hour holds 9 -- a spike twice everything
-        // else, caused by its width rather than by the data. Plotting only the
-        // fixed-width bands keeps every point comparable. The count it holds is in
-        // the caption and the table, so nothing is hidden, only moved.
+        // The open-ended tail band is left OFF the chart on purpose: every other
+        // point covers exactly one hour and that one covers 500+, so it is not a
+        // comparable reading. Its count is in the caption and the table.
         var plotted = _bands.Where(b => !b.IsOpenEnded).ToList();
 
+        // SmoothedUnits, not Units. Raw one-hour counts over ~200 games average
+        // well under one and jump between 0 and 10 -- sampling noise, not shape.
+        // The view's centred five-hour rolling sum turns that into a curve without
+        // inventing anything: every input is a real count.
         _bandSeries = [new ChartSeries<double>
         {
             Name = "Games",
-            Data = new ChartData<double>(plotted.Select(b => (double)b.Units).ToArray())
+            Data = new ChartData<double>(plotted.Select(b => (double)b.SmoothedUnits).ToArray())
         }];
 
-        // Sixty labels would overprint each other into a smear, so only every fifth
-        // hour is named and the rest are blank. MudBlazor still spaces the points
-        // evenly -- the blanks remove text, never a reading.
+        // 200 labels would be a solid smear, so only every twentieth hour is named
+        // and the rest are blank. MudBlazor still spaces the points evenly -- the
+        // blanks remove text, never a reading.
         _bandLabels = plotted
-            .Select(b => b.FromHours % 5 == 0 ? $"{b.FromHours:0.#}" : "")
+            .Select(b => b.FromHours % 20 == 0 ? $"{b.FromHours:0.#}" : "")
             .ToArray();
 
         _bandTotal = _bands.Sum(b => b.Units);
         _medianLabel = MedianLabel();
+        _occupied = _bands.Where(b => b.Units > 0).ToList();
 
         // Read off the view, so changing the step or cap in install.sql carries
         // through to the caption instead of drifting from it.
