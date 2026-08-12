@@ -14,7 +14,18 @@
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
-<body>
+@* Enhanced navigation is off app-wide. It patches the DOM client-side from a
+   fetched response, on its own schedule rather than the circuit's, and under
+   real latency the two can reach the same nodes -- the suspected source of the
+   "Cannot read properties of null (reading 'insertBefore'/'removeChild')"
+   exceptions killing circuits on the Pi. Nothing is given up by turning it off:
+   every page here is InteractiveServer, so the router already routes over the
+   circuit.
+
+   The attribute must sit on an ELEMENT. Putting it on <Routes> compiles and
+   then throws at parameter binding -- "Object of type 'Routes' does not have a
+   property matching the name 'data-enhance-nav'" -- 500ing every request. *@
+<body data-enhance-nav="false">
     @* Interactivity is set here, for the whole app including the layout. With
        per-page @@rendermode the app bar renders statically and its buttons have
        no handlers -- the theme toggle silently does nothing. *@
