@@ -1732,6 +1732,69 @@ COMMENT ON FUNCTION custom.game_series_set(text, text, int) IS
     'Place a game in a series at a position, creating the series if needed.';
 
 
+-- Slot a game INTO a series, pushing everything from that slot onwards down one.
+--     SELECT id, game_name, series_position
+--       FROM custom.series_insert_at(<id of Yakuza Kiwami 2>, 'Yakuza', 3);
+--
+-- The difference from game_series_set(): that one writes the position verbatim,
+-- so asking for a slot somebody already holds produces a tie. This one opens a
+-- gap first, which is what "insert between these two entries" means -- and is
+-- what the /add page asks for, because there the user has pointed at a gap
+-- rather than typed a number.
+--
+-- It shifts rather than renumbering 1..n. A tie is deliberate (see the note on
+-- game_completion_times_series_idx: 'Soul Reaver 1 & 2 Remastered'), and a
+-- blanket row_number() renumber would split one into two slots and change what
+-- blocks what. +1 moves tied rows together, so they stay tied.
+--
+-- p_position NULL appends after the last entry.
+CREATE OR REPLACE FUNCTION custom.series_insert_at(p_game_id int,
+                                                   p_series text,
+                                                   p_position int DEFAULT NULL)
+    RETURNS SETOF custom.game_completion_times
+    LANGUAGE plpgsql
+    VOLATILE
+AS $$
+DECLARE
+    v_series_id int := custom.series_id(p_series);
+    v_position  int := p_position;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM custom.game_completion_times g WHERE g.id = p_game_id) THEN
+        RAISE EXCEPTION 'series_insert_at: no game with id %', p_game_id
+            USING ERRCODE = 'no_data_found';
+    END IF;
+
+    IF v_position IS NULL THEN
+        -- Counts the game itself if it is already in this series, which is
+        -- harmless: it is about to be moved to the end anyway.
+        SELECT coalesce(max(g.series_position), 0) + 1 INTO v_position
+        FROM custom.game_completion_times g
+        WHERE g.series_id = v_series_id;
+    ELSIF v_position < 1 THEN
+        RAISE EXCEPTION 'series_insert_at: position must be >= 1, got %', v_position
+            USING ERRCODE = 'invalid_parameter_value';
+    ELSE
+        UPDATE custom.game_completion_times g
+           SET series_position = g.series_position + 1
+         WHERE g.series_id = v_series_id
+           AND g.series_position >= v_position
+           AND g.id <> p_game_id;
+    END IF;
+
+    RETURN QUERY
+    UPDATE custom.game_completion_times g
+       SET series_id       = v_series_id,
+           series_position = v_position
+     WHERE g.id = p_game_id
+    RETURNING g.*;
+END;
+$$;
+
+COMMENT ON FUNCTION custom.series_insert_at(int, text, int) IS
+    'Insert a game into a series at a slot, pushing later entries down one; '
+    'NULL position appends. Creates the series if needed.';
+
+
 -- Take a game back out of its series. Both columns clear together, as the
 -- table's CHECK requires.
 CREATE OR REPLACE FUNCTION custom.game_series_clear(p_name text)

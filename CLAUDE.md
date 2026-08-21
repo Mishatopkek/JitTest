@@ -50,6 +50,7 @@ Key objects:
 | `game_roll()` | rolls by bucket; redirects to a series head |
 | `game_roll_range()` | rolls by an hours range **or** a tier, plus tags; no redirect needed — see rule 10 |
 | `game_add()` | inserts; knows `hours_average` is generated |
+| `series_insert_at()` | slots a game into a series, pushing later entries down one; NULL position appends |
 
 ## Domain rules that are easy to break
 
@@ -81,6 +82,12 @@ to the user.
     still carries a redirect, but it joins the same playable pool, so in
     practice that branch is unreachable; it is left alone rather than changed
     underneath its callers.)
+11. **`series_position` ties are deliberate, so nothing may renumber a series
+    wholesale.** Two games at the same slot unblock together — that is what
+    "Soul Reaver 1 & 2 Remastered" means. `series_insert_at()` opens a gap with
+    `+1`, which moves a tied pair as one; a `row_number()` renumber would split
+    it and change what blocks what. `game_series_set()` still writes a position
+    verbatim, which is how a tie is *created*.
 
 ## UI conventions
 
@@ -93,6 +100,15 @@ numbers stripped.
 The exception is a length the user *typed*: `/roll`'s range readout ("3h – 4h")
 is their own input echoed back, not a fact about any game, so it shows either
 way. The drawn game's actual hours stay behind the flag.
+
+**`/add` never asks for a series position as a number.** The page loads every
+series once, the autocomplete picks one (or names a new one), and the entries are
+drawn in play order with a gap between each. You point at the gap; the page hands
+the server the position that gap stands for and `series_insert_at()` pushes the
+rest down. Typing a number is what the old form did, and it meant choosing blind:
+nothing on the page said which slots were taken or what the number would block.
+The list is a preview of the order *after* the add, so the entries below the
+chosen gap render with their pushed-down numbers, not their stored ones.
 
 **`/roll`'s pool count is computed in memory, on purpose.** The page loads
 `v_roll_pool` once and filters ~200 rows per slider move. The slider fires on

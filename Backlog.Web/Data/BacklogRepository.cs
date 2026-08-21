@@ -188,9 +188,14 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
     /// Insert a game, returning its id.
     ///
     /// Delegates to custom.game_add rather than writing the INSERT here: that
-    /// function knows hours_average is a generated column (naming it raises),
-    /// creates any new tags and series, and enforces that series and position
-    /// are given together.
+    /// function knows hours_average is a generated column (naming it raises)
+    /// and creates any new tags.
+    ///
+    /// The series slot is placed by custom.series_insert_at instead of by
+    /// game_add, because "position 3" from a UI that pointed at a gap means
+    /// insert-and-push, not "write 3 and tie with whoever holds it". Both
+    /// statements run in one transaction, so a rejected slot cannot leave the
+    /// game added and filed nowhere.
     /// </summary>
     public async Task<int> AddGameAsync(
         string name,
@@ -202,31 +207,51 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
         name = name.Trim();
         if (name.Length == 0) throw new ArgumentException("Name is empty.", nameof(name));
 
-        await using var cmd = db.CreateCommand(
+        await using var connection = await db.OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        int id;
+        await using (var add = new NpgsqlCommand(
             """
             SELECT id FROM custom.game_add(
-                @name, @main, @extra, @comp, @notes, @priority, @tags, @series, @slot)
-            """);
+                @name, @main, @extra, @comp, @notes, @priority, @tags, NULL, NULL)
+            """, connection, transaction))
+        {
+            // Types are declared explicitly rather than inferred: an untyped
+            // DBNull gives Postgres nothing to resolve game_add's overload
+            // against, and the text[] parameter cannot be inferred from a null
+            // at all.
+            add.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Text) { Value = name });
+            add.Parameters.Add(new NpgsqlParameter("main", NpgsqlDbType.Numeric) { Value = hoursMain });
+            add.Parameters.Add(new NpgsqlParameter("extra", NpgsqlDbType.Numeric) { Value = hoursMainExtra });
+            add.Parameters.Add(new NpgsqlParameter("comp", NpgsqlDbType.Numeric) { Value = hoursCompletionist });
+            add.Parameters.Add(new NpgsqlParameter("notes", NpgsqlDbType.Text)
+                { Value = (object?)notes ?? DBNull.Value });
+            add.Parameters.Add(new NpgsqlParameter("priority", NpgsqlDbType.Integer)
+                { Value = (object?)priority ?? DBNull.Value });
+            add.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
+                { Value = tags is { Length: > 0 } ? tags : DBNull.Value });
 
-        // Types are declared explicitly rather than inferred: an untyped
-        // DBNull gives Postgres nothing to resolve game_add's overload against,
-        // and the text[] parameter cannot be inferred from a null at all.
-        cmd.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Text) { Value = name });
-        cmd.Parameters.Add(new NpgsqlParameter("main", NpgsqlDbType.Numeric) { Value = hoursMain });
-        cmd.Parameters.Add(new NpgsqlParameter("extra", NpgsqlDbType.Numeric) { Value = hoursMainExtra });
-        cmd.Parameters.Add(new NpgsqlParameter("comp", NpgsqlDbType.Numeric) { Value = hoursCompletionist });
-        cmd.Parameters.Add(new NpgsqlParameter("notes", NpgsqlDbType.Text)
-            { Value = (object?)notes ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("priority", NpgsqlDbType.Integer)
-            { Value = (object?)priority ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("tags", NpgsqlDbType.Array | NpgsqlDbType.Text)
-            { Value = tags is { Length: > 0 } ? tags : DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("series", NpgsqlDbType.Text)
-            { Value = (object?)series ?? DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("slot", NpgsqlDbType.Integer)
-            { Value = (object?)seriesPosition ?? DBNull.Value });
+            id = (int)(await add.ExecuteScalarAsync(ct))!;
+        }
 
-        return (int)(await cmd.ExecuteScalarAsync(ct))!;
+        if (!string.IsNullOrWhiteSpace(series))
+        {
+            await using var place = new NpgsqlCommand(
+                "SELECT id FROM custom.series_insert_at(@id, @series, @slot)",
+                connection, transaction);
+
+            place.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Integer) { Value = id });
+            place.Parameters.Add(new NpgsqlParameter("series", NpgsqlDbType.Text) { Value = series });
+            // NULL appends after the last entry.
+            place.Parameters.Add(new NpgsqlParameter("slot", NpgsqlDbType.Integer)
+                { Value = (object?)seriesPosition ?? DBNull.Value });
+
+            await place.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        return id;
     }
 
     /// <summary>

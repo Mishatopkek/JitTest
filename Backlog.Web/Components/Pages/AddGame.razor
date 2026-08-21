@@ -77,16 +77,108 @@
             <MudTextField @bind-Value="_notes" Label="Notes" Variant="Variant.Outlined"
                           Class="mt-3" Lines="2" />
 
-            <MudGrid Class="mt-1">
-                <MudItem xs="8">
-                    <MudTextField @bind-Value="_series" Label="Series" Variant="Variant.Outlined"
-                                  HelperText="Created if new" />
-                </MudItem>
-                <MudItem xs="4">
-                    <MudNumericField T="int?" @bind-Value="_seriesPosition" Label="Position"
-                                     Variant="Variant.Outlined" Min="1" />
-                </MudItem>
-            </MudGrid>
+             <MudText Typo="Typo.overline" Class="d-block mt-4">Series</MudText>
+
+            <MudAutocomplete T="string" Value="_seriesName" ValueChanged="OnSeriesChanged"
+                             SearchFunc="SearchSeries" CoerceValue="true"
+                             Immediate="true" DebounceInterval="200"
+                             Clearable="true" MaxItems="null"
+                             Label="Series" Variant="Variant.Outlined" Class="mt-2"
+                             Placeholder="pick one, or type a new name"
+                             HelperText="@SeriesHelper">
+                <ItemTemplate Context="name">
+                    <div class="d-flex align-center gap-2">
+                        <MudText Typo="Typo.body2">@name</MudText>
+                        <MudSpacer />
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@Entries(name)</MudText>
+                    </div>
+                </ItemTemplate>
+            </MudAutocomplete>
+
+            @* The whole point of this block: you never type a position. The
+               series is drawn in play order and you point at the gap the game
+               belongs in, so the list below reads as the order AFTER the add. *@
+            @if (!string.IsNullOrWhiteSpace(_seriesName))
+            {
+                var groups = Groups;
+
+                @if (groups.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                        @if (Picked is null)
+                        {
+                            <text>New series <strong>@_seriesName.Trim()</strong> — this game becomes entry 1.</text>
+                        }
+                        else
+                        {
+                            <text>@Picked.Name is empty — this game becomes entry 1.</text>
+                        }
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mt-3">
+                        Entry 1 is played first. A game only becomes available once every
+                        entry above it is finished, so where you put it decides what it waits for.
+                    </MudText>
+
+                    <div class="d-flex flex-column mt-2">
+                        @for (var i = 0; i <= groups.Count; i++)
+                        {
+                            var slot = i;
+
+                            @if (slot == Slot)
+                            {
+                                <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-2"
+                                          Style="border-color:var(--mud-palette-primary)">
+                                    <MudText Typo="Typo.body2" Color="Color.Primary"
+                                             Style="min-width:1.5rem;font-variant-numeric:tabular-nums">
+                                        @ChosenPosition
+                                    </MudText>
+                                    <MudText Typo="Typo.body1" Color="Color.Primary">
+                                        @(_name.Trim().Length > 0 ? _name.Trim() : "this game")
+                                    </MudText>
+                                    <MudSpacer />
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                             Color="Color.Primary">new</MudChip>
+                                </MudPaper>
+                            }
+                            else
+                            {
+                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                           Class="justify-start" FullWidth="true"
+                                           StartIcon="@Icons.Material.Rounded.Add"
+                                           OnClick="@(() => Slot = slot)">
+                                    insert here
+                                </MudButton>
+                            }
+
+                            @if (slot < groups.Count)
+                            {
+                                foreach (var game in groups[slot])
+                                {
+                                    <MudPaper Outlined="true" Class="pa-2 d-flex align-center gap-2">
+                                        <MudText Typo="Typo.body2" Class="mud-text-secondary"
+                                                 Style="min-width:1.5rem;font-variant-numeric:tabular-nums">
+                                            @Shown(game.Position)
+                                        </MudText>
+                                        <MudText Typo="Typo.body1"
+                                                 Class="@(game.Finished ? "mud-text-disabled" : "")"
+                                                 Style="@(game.Finished ? "text-decoration:line-through" : "")">
+                                            @game.Name
+                                        </MudText>
+                                        <MudSpacer />
+                                        @if (game.Finished)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">finished</MudChip>
+                                        }
+                                    </MudPaper>
+                                }
+                            }
+                        }
+                    </div>
+                }
+            }
 
             @if (_error is not null)
             {
@@ -156,10 +248,11 @@
 @code {
     private string _name = "";
     private decimal? _main, _extra, _completionist;
-    private string? _notes, _series, _newTags;
-    private int? _seriesPosition;
+    private string? _notes, _seriesName, _newTags;
+    private int _slot;
     private IReadOnlyCollection<string> _tags = [];
     private List<string> _allTags = [];
+    private List<Series> _allSeries = [];
     private List<PickGame> _hits = [];
     private PickGame? _exactMatch;
     private string? _error;
@@ -174,7 +267,98 @@
     private bool CanSave =>
         _name.Trim().Length > 0 && _main is not null && _extra is not null && _completionist is not null;
 
-    protected override async Task OnInitializedAsync() => _allTags = await Repo.GetTagsAsync();
+    /// <summary>
+    /// The typed name resolved to an existing series, matching the way
+    /// custom.series_id() does it -- case-insensitively. Null means the name is
+    /// new and the series will be created.
+    /// </summary>
+    private Series? Picked =>
+        string.IsNullOrWhiteSpace(_seriesName)
+            ? null
+            : _allSeries.FirstOrDefault(s =>
+                string.Equals(s.Name, _seriesName.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Entries grouped by stored position, in play order. Grouping rather than
+    /// listing rows means a deliberate tie -- two games that unblock together --
+    /// is one slot in the picker and cannot be split by an insert, which is
+    /// exactly what custom.series_insert_at() does on the way back down.
+    /// </summary>
+    private List<List<SeriesGame>> Groups =>
+        Picked is null
+            ? []
+            : Picked.Games
+                .GroupBy(g => g.Position)
+                .OrderBy(g => g.Key)
+                .Select(g => g.ToList())
+                .ToList();
+
+    /// <summary>Which gap is chosen: 0 is before the first entry, Groups.Count is last.</summary>
+    private int Slot
+    {
+        get => Math.Clamp(_slot, 0, Groups.Count);
+        set => _slot = value;
+    }
+
+    /// <summary>
+    /// The position the server is asked for. Inserting before a group takes that
+    /// group's number and pushes it down; the end gap takes one past the last.
+    /// </summary>
+    private int? ChosenPosition
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_seriesName)) return null;
+
+            var groups = Groups;
+            if (groups.Count == 0) return 1;
+
+            return Slot < groups.Count
+                ? groups[Slot][0].Position
+                : groups[^1][0].Position + 1;
+        }
+    }
+
+    // What an existing entry will be numbered after the insert pushes it down.
+    private int Shown(int position) =>
+        ChosenPosition is { } chosen && position >= chosen ? position + 1 : position;
+
+    private string Entries(string name)
+    {
+        var count = _allSeries.FirstOrDefault(s => s.Name == name)?.Games.Count ?? 0;
+        return count == 1 ? "1 entry" : $"{count} entries";
+    }
+
+    private string SeriesHelper =>
+        string.IsNullOrWhiteSpace(_seriesName) ? "Optional"
+        : Picked is null ? "No series by that name — it will be created"
+        : Entries(Picked.Name);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allTags = await Repo.GetTagsAsync();
+        _allSeries = await Repo.GetSeriesAsync();
+    }
+
+    // Filtered in memory: 34 series is nothing, and a query per keystroke would
+    // be a round trip per letter. Empty text lists them all on purpose -- seeing
+    // what already exists is the point of the picker.
+    private Task<IEnumerable<string>> SearchSeries(string? value, CancellationToken ct)
+    {
+        var names = _allSeries.Select(s => s.Name);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            names = names.Where(n => n.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(names);
+    }
+
+    private void OnSeriesChanged(string? value)
+    {
+        _seriesName = value;
+        _slot = Groups.Count; // a sequel is the common case, so default to last
+    }
 
     private async Task OnNameChanged(string value)
     {
@@ -198,9 +382,13 @@
     {
         _error = null;
 
+        var series = string.IsNullOrWhiteSpace(_seriesName) ? null : _seriesName.Trim();
+        var position = ChosenPosition;
+
         // The table's CHECK enforces this too, but with a constraint name rather
-        // than an explanation.
-        if ((_series is null) != (_seriesPosition is null))
+        // than an explanation. ChosenPosition derives from the same field, so
+        // this only fires on a bug in here.
+        if ((series is null) != (position is null))
         {
             _error = "Give both a series and a position, or neither.";
             return;
@@ -221,11 +409,22 @@
                 string.IsNullOrWhiteSpace(_notes) ? null : _notes,
                 priority: null,
                 tags: tags,
-                series: string.IsNullOrWhiteSpace(_series) ? null : _series,
-                seriesPosition: _seriesPosition);
+                series: series,
+                seriesPosition: position);
 
             Snackbar.Add($"Added {_name.Trim()} (#{id})", MudBlazor.Severity.Success);
+
+            var slot = Slot;
             Reset();
+
+            // Adding a trilogy is three visits to this page, so keep the series
+            // and park the cursor after the entry just added.
+            if (series is not null)
+            {
+                _allSeries = await Repo.GetSeriesAsync();
+                _seriesName = series;
+                _slot = slot + 1;
+            }
         }
         catch (Exception ex)
         {
@@ -241,8 +440,8 @@
     {
         _name = "";
         _main = _extra = _completionist = null;
-        _notes = _series = _newTags = null;
-        _seriesPosition = null;
+        _notes = _seriesName = _newTags = null;
+        _slot = 0;
         _tags = [];
         _hits = [];
         _exactMatch = null;
