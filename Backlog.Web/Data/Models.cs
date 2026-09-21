@@ -22,7 +22,8 @@ public sealed record Game(
     bool Finished,
     long Parts,
     long PartsFinished,
-    string? NextUp)
+    string? NextUp,
+    string? Notes)
 {
     public bool IsSplit => Parts > 0;
 }

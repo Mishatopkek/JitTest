@@ -24,7 +24,7 @@ else
                      Color="@(on ? Color.Primary : Color.Default)"
                      Size="Size.Small"
                      OnClick="@(() => ToggleTag(key))">
-                @tag <span class="mud-text-disabled ml-1">@CountWith(key, on)</span>
+                @tag <span class="mud-text-disabled ml-1">@_tagCount.GetValueOrDefault(key)</span>
             </MudChip>
         }
 
@@ -82,6 +82,7 @@ else
                      Position="@PositionOf(context)"
                      Draggable="@(!Filtering)"
                      Tags="_tags"
+                     Parts="@PartsOf(context)"
                      OnChanged="ReloadAsync"
                      OnUnrank="@(() => UnrankAsync(context))" />
         </ItemRenderer>
@@ -101,6 +102,7 @@ else
             @foreach (var game in UnrankedShown)
             {
                 <GameRow Game="game" Position="null" Draggable="false" Tags="_tags"
+                         Parts="@PartsOf(game)"
                          OnChanged="ReloadAsync"
                          OnRank="@(() => RankAsync(game))" />
             }
@@ -119,6 +121,7 @@ else
                     @foreach (var game in DoneShown)
                     {
                         <GameRow Game="game" Position="null" Draggable="false" Tags="_tags"
+                                 Parts="@PartsOf(game)"
                                  OnChanged="ReloadAsync" />
                     }
                 </div>
@@ -140,36 +143,132 @@ else
     // the list itself. See the comment on MudDropContainer above.
     private readonly List<Game> _shownRanked = [];
     private List<Game> RankedShown => _shownRanked;
-    private List<Game> UnrankedShown => Filter(_board!.Unranked);
-    private List<Game> DoneShown => Filter(_board!.Done);
+
+    // The other two piles are fields rather than properties for the same reason
+    // the tag counts are: as properties they re-filtered a pile on every render,
+    // and this page re-renders on every keystroke in the search box. Nothing they
+    // depend on moves between RefreshShown calls.
+    private List<Game> _shownUnranked = [];
+    private List<Game> _shownDone = [];
+    private List<Game> UnrankedShown => _shownUnranked;
+    private List<Game> DoneShown => _shownDone;
 
     // gameId -> 1-based rank, so rendering 234 rows is not O(n^2) IndexOf calls.
     private Dictionary<int, int> _rankOf = [];
+
+    // gameId -> the games inside it, loaded with the board. A row fetching its
+    // own was a round trip per split game on every render -- see GameRow.Parts.
+    private Dictionary<int, List<Part>> _parts = [];
+
+    // One shared instance, so an unsplit row is handed the same list every
+    // render and GameRow.ShouldRender can see that nothing moved.
+    private static readonly List<Part> NoParts = [];
+
+    // gameId -> its tags, lowercased once. Filtering built this per game per
+    // call, and the chip counts built it again for every chip.
+    private Dictionary<int, HashSet<string>> _lowerTags = [];
+
+    // Lowercased tag -> the number beside the chip.
+    private Dictionary<string, int> _tagCount = [];
+
+    // What the last reload handed the rows, so an unchanged row can be handed
+    // the very same objects again. See ReuseUnchanged.
+    private Dictionary<int, Game> _lastGames = [];
+    private Dictionary<int, List<Part>> _lastParts = [];
+    private List<string> _lastTags = [];
+
+    private List<Part> PartsOf(Game game) => _parts.GetValueOrDefault(game.Id, NoParts);
+
+    /// <summary>
+    /// Swap freshly read rows for the identical instances the last read produced.
+    ///
+    /// The board reloads in full after every change, and everything it hands back
+    /// is a new object even where nothing moved. GameRow skips a re-render when
+    /// its inputs are the same objects it last drew, so without this, ticking one
+    /// checkbox redraws all ~240 rows rather than the one that changed.
+    ///
+    /// Game and Part are records, so "identical" is a field-by-field comparison.
+    /// Tags is an array, which a record compares by reference, so it is compared
+    /// element-wise and then substituted in to let the record do the rest.
+    /// </summary>
+    private void ReuseUnchanged()
+    {
+        foreach (var pile in new[] { _board!.Ranked, _board.Unranked, _board.Done })
+        {
+            for (var i = 0; i < pile.Count; i++)
+            {
+                var fresh = pile[i];
+                if (_lastGames.TryGetValue(fresh.Id, out var old)
+                    && old.Tags.AsSpan().SequenceEqual(fresh.Tags)
+                    && old == fresh with { Tags = old.Tags })
+                {
+                    pile[i] = old;
+                }
+            }
+        }
+
+        foreach (var gameId in _parts.Keys.ToList())
+        {
+            if (_lastParts.TryGetValue(gameId, out var old) && old.SequenceEqual(_parts[gameId]))
+            {
+                _parts[gameId] = old;
+            }
+        }
+
+        // The tag list is a row parameter too, and it is the same list on all but
+        // the reload that actually created or dropped a tag.
+        if (_tags.SequenceEqual(_lastTags)) _tags = _lastTags;
+
+        _lastGames = AllGames.ToDictionary(g => g.Id);
+        _lastParts = _parts;
+        _lastTags = _tags;
+    }
 
     protected override Task OnInitializedAsync() => ReloadAsync();
 
     private async Task ReloadAsync()
     {
-        _board = await Repo.GetBoardAsync();
-        _tags = await Repo.GetTagsAsync();
+        // Three independent reads on a pooled data source, so one round trip
+        // rather than three. This is the hot path, not startup: the board
+        // reloads after every rank, finish, split and tag change.
+        var board = Repo.GetBoardAsync();
+        var tags = Repo.GetTagsAsync();
+        var parts = Repo.GetAllPartsAsync();
+        await Task.WhenAll(board, tags, parts);
+
+        _board = board.Result;
+        _tags = tags.Result;
+        _parts = parts.Result;
+
+        ReuseUnchanged();
 
         _rankOf = _board.Ranked
             .Select((g, i) => (g.Id, Rank: i + 1))
             .ToDictionary(x => x.Id, x => x.Rank);
 
+        _lowerTags = AllGames.ToDictionary(
+            g => g.Id,
+            g => g.Tags.Select(t => t.ToLowerInvariant()).ToHashSet());
+
         RefreshShown();
     }
+
+    private IEnumerable<Game> AllGames =>
+        _board!.Ranked.Concat(_board.Unranked).Concat(_board.Done);
 
     private void RefreshShown()
     {
         _shownRanked.Clear();
         _shownRanked.AddRange(Filter(_board!.Ranked));
+        _shownUnranked = Filter(_board.Unranked);
+        _shownDone = Filter(_board.Done);
+        RecountTags();
         _container?.Refresh();
     }
 
     private List<Game> Filter(List<Game> games)
     {
-        var needle = _search.Trim().ToLowerInvariant();
+        var needle = _search.Trim();
 
         return games.Where(g =>
         {
@@ -177,7 +276,7 @@ else
             // picking PC + co-op means both, not either.
             if (_activeTags.Count > 0)
             {
-                var own = g.Tags.Select(t => t.ToLowerInvariant()).ToHashSet();
+                var own = _lowerTags[g.Id];
                 if (!_activeTags.All(own.Contains)) return false;
             }
 
@@ -198,16 +297,34 @@ else
             ? game.Priority
             : _rankOf.TryGetValue(game.Id, out var rank) ? rank : game.Priority;
 
-    /// <summary>Games left if this chip were also selected -- so a dead end shows 0 first.</summary>
-    private int CountWith(string tag, bool alreadyOn)
+    /// <summary>
+    /// What each chip reads: games left if that chip were also selected -- so a
+    /// dead end shows 0 first. One pass over the board scores every chip at once,
+    /// rather than a pass per chip per render, because the numbers only move when
+    /// the selection does.
+    /// </summary>
+    private void RecountTags()
     {
-        var want = alreadyOn ? _activeTags : new HashSet<string>(_activeTags) { tag };
-        var all = _board!.Ranked.Concat(_board.Unranked).Concat(_board.Done);
-        return all.Count(g =>
+        var keys = _tags.Select(t => t.ToLowerInvariant()).Distinct().ToArray();
+
+        _tagCount = new Dictionary<string, int>(keys.Length);
+        foreach (var key in keys) _tagCount[key] = 0;
+
+        foreach (var game in AllGames)
         {
-            var own = g.Tags.Select(t => t.ToLowerInvariant()).ToHashSet();
-            return want.All(own.Contains);
-        });
+            var own = _lowerTags[game.Id];
+
+            // Every chip's set is the selection plus itself, so a game missing
+            // the selection is out for all of them.
+            if (!_activeTags.All(own.Contains)) continue;
+
+            foreach (var key in keys)
+            {
+                // An already-selected chip asks for the selection alone, which
+                // this game has; any other chip asks for one tag more.
+                if (_activeTags.Contains(key) || own.Contains(key)) _tagCount[key]++;
+            }
+        }
     }
 
     private void ToggleTag(string tag)

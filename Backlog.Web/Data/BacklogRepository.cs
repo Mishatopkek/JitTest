@@ -26,7 +26,7 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
             """
             SELECT id, game_name, hours_average, priority,
                    series, series_slot, series_total, blocked_by, tags,
-                   finished, parts, parts_finished, next_up
+                   finished, parts, parts_finished, next_up, notes
             FROM custom.v_game
             ORDER BY priority, game_name
             """);
@@ -52,7 +52,8 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
                 finished,
                 reader.GetInt64(10),
                 reader.GetInt64(11),
-                reader.IsDBNull(12) ? null : reader.GetString(12));
+                reader.IsDBNull(12) ? null : reader.GetString(12),
+                reader.IsDBNull(13) ? null : reader.GetString(13));
 
             (finished ? done : priority is null ? unranked : ranked).Add(game);
         }
@@ -86,34 +87,47 @@ public sealed class BacklogRepository(NpgsqlDataSource db)
         return games;
     }
 
-    public async Task<List<Part>> GetPartsAsync(int gameId, CancellationToken ct = default)
+    /// <summary>
+    /// Every split game's parts in one query, keyed by game id.
+    ///
+    /// The board renders a row per game and each split row needs its parts, so
+    /// asking per row is a round trip per split game on every reload -- and the
+    /// board reloads after every rank, finish and tag change. One query for the
+    /// lot costs the same as one of those.
+    /// </summary>
+    public async Task<Dictionary<int, List<Part>>> GetAllPartsAsync(CancellationToken ct = default)
     {
         await using var cmd = db.CreateCommand(
             """
-            SELECT p.id, p.part_name, p.part_position, u.hours, p.finished, u.playable, u.blocked_by
+            SELECT p.game_id, p.id, p.part_name, p.part_position,
+                   u.hours, p.finished, u.playable, u.blocked_by
             FROM custom.game_part p
             JOIN custom.v_unit u ON u.part_id = p.id
-            WHERE p.game_id = @id
-            ORDER BY p.part_position
+            ORDER BY p.game_id, p.part_position
             """);
-        cmd.Parameters.AddWithValue("id", gameId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-        List<Part> parts = [];
+        Dictionary<int, List<Part>> byGame = [];
         while (await reader.ReadAsync(ct))
         {
+            var gameId = reader.GetInt32(0);
+            if (!byGame.TryGetValue(gameId, out var parts))
+            {
+                byGame[gameId] = parts = [];
+            }
+
             parts.Add(new Part(
-                reader.GetInt32(0),
-                reader.GetString(1),
-                reader.GetInt32(2),
-                reader.IsDBNull(3) ? null : reader.GetDecimal(3),
-                reader.GetBoolean(4),
+                reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : reader.GetDecimal(4),
                 reader.GetBoolean(5),
-                reader.IsDBNull(6) ? null : reader.GetString(6)));
+                reader.GetBoolean(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
 
-        return parts;
+        return byGame;
     }
 
     /// <summary>

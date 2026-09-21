@@ -105,12 +105,24 @@
         }
     </div>
 
+    @* A note is always shown when there is one. It carries things the row
+       cannot -- a translation patch that is not out yet -- and a tooltip would
+       hide exactly the rows you need warning about. *@
+    @if (!string.IsNullOrWhiteSpace(Game.Notes))
+    {
+        <div class="d-flex align-start gap-2 mt-1 ml-8">
+            <MudIcon Icon="@Icons.Material.Rounded.StickyNote2" Size="Size.Small"
+                     Class="mud-text-secondary" />
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">@Game.Notes</MudText>
+        </div>
+    }
+
     @if (Game.IsSplit)
     {
         <MudCollapse Expanded="_open">
             <div class="d-flex flex-column gap-1 mt-2 ml-8 pl-3"
                  style="border-left:2px solid var(--mud-palette-lines-default)">
-                @foreach (var part in _parts)
+                @foreach (var part in Parts)
                 {
                     <div class="d-flex align-center gap-2">
                         <MudCheckBox T="bool" Value="part.Finished" Dense="true" Color="Color.Primary"
@@ -154,10 +166,27 @@
     [Parameter] public EventCallback OnRank { get; set; }
     [Parameter] public EventCallback OnUnrank { get; set; }
 
-    private List<Part> _parts = [];
+    /// <summary>
+    /// The games inside this purchase, empty when it is not split. Handed down
+    /// rather than fetched here: the board holds every row's parts already, and
+    /// a query per row was a round trip per split game on every single render.
+    ///
+    /// They must still ALWAYS be present, not fetched on expand -- the old UI
+    /// cached them only for expanded rows, and the split editor opened blank for
+    /// a collapsed game, which read as "no parts" and wiped it.
+    /// </summary>
+    [Parameter] public List<Part> Parts { get; set; } = [];
+
     private bool _open;
     private bool _tagging;
     private string? _newTag;
+
+    // What was on screen at the last render. The board re-renders all ~240 rows
+    // on every keystroke in the search box and every tag chip, and diffing a row
+    // whose inputs did not move is pure cost. Game is a record and the board
+    // hands out fresh instances on reload, so equality here is both cheap and
+    // exact: unchanged row, unchanged instance, no re-render.
+    private (Game?, int?, bool, List<string>?, List<Part>?, bool, bool, string?) _rendered;
 
     private string NameClass => Game.Finished ? "mud-text-disabled" : "";
 
@@ -165,15 +194,22 @@
 
     public void Dispose() => Ui.Changed -= Redraw;
 
-    private void Redraw() => InvokeAsync(StateHasChanged);
-
-    protected override async Task OnParametersSetAsync()
+    // ShowHours is read during render but is not a parameter, so a theme-style
+    // signature would miss it. Forcing the next render past ShouldRender is
+    // simpler than folding it in.
+    private void Redraw()
     {
-        // Parts are fetched lazily, but ALWAYS before they are needed -- the old
-        // UI cached them only for expanded rows, and the split editor opened
-        // blank for a collapsed game, which read as "no parts" and wiped it.
-        if (Game.IsSplit) _parts = await Repo.GetPartsAsync(Game.Id);
-        else _parts = [];
+        _rendered = default;
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override bool ShouldRender()
+    {
+        var now = (Game, Position, Draggable, Tags, Parts, _open, _tagging, _newTag);
+        if (_rendered == now) return false;
+
+        _rendered = now;
+        return true;
     }
 
     private async Task SetFinishedAsync(bool finished)
@@ -230,7 +266,7 @@
         {
             { x => x.GameId, Game.Id },
             { x => x.GameName, Game.Name },
-            { x => x.Existing, _parts }
+            { x => x.Existing, Parts }
         };
 
         var dialog = await Dialogs.ShowAsync<SplitDialog>("Split", parameters,
