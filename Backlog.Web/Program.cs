@@ -22,6 +22,7 @@ var connectionString = builder.Configuration.GetConnectionString("Games")
 builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 builder.Services.AddScoped<BacklogRepository>();
 builder.Services.AddScoped<UiState>();
+builder.Services.AddScoped<ObsidianExporter>();
 
 var app = builder.Build();
 
@@ -36,6 +37,18 @@ app.UseHttpsRedirection();
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+app.MapPost("/api/obsidian/export", async (ObsidianExporter exporter, bool? dryRun, CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Ok(await exporter.ExportAsync(dryRun ?? false, ct));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+    }
+});
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

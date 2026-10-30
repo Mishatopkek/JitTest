@@ -1,0 +1,101 @@
+@page "/obsidian"
+@inject ObsidianExporter Exporter
+@inject IJSRuntime Js
+
+<PageTitle>Obsidian</PageTitle>
+
+<MudText Typo="Typo.h6" Class="mb-1">Sync to Obsidian</MudText>
+<MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+    Creates a stub note for every game that has none yet. In notes that already
+    exist only the series, series_position, previous and next properties are
+    written. Everything else in them is left as it is.
+</MudText>
+
+<MudTextField T="string" @bind-Value="_vaultPath" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense"
+              Label="Vault path on the server" HelperText="Empty uses Obsidian:VaultPath from the server config. Remembered in this browser"
+              Class="mb-4" />
+
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Outlined" Disabled="_busy" OnClick="PreviewAsync">Preview</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="@(_busy || _result is not { DryRun: true } || _result.Created.Count + _result.Updated.Count == 0)"
+               OnClick="SyncAsync">Sync</MudButton>
+</MudStack>
+
+@if (_busy)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+}
+else if (_result is not null)
+{
+    <MudAlert Severity="@(_result.DryRun ? Severity.Info : Severity.Success)" Dense="true" Class="mb-4">
+        @(_result.DryRun ? "Would create" : "Created") @_result.Created.Count,
+        @(_result.DryRun ? "would update" : "updated") @_result.Updated.Count,
+        left @_result.SkippedExisting unchanged
+    </MudAlert>
+
+    @if (_result.Created.Count + _result.Updated.Count > 0)
+    {
+        <MudPaper Outlined="true" Class="pa-2">
+            <MudList T="string" Dense="true">
+                @foreach (var name in _result.Created)
+                {
+                    <MudListItem T="string">+ @name</MudListItem>
+                }
+                @foreach (var name in _result.Updated)
+                {
+                    <MudListItem T="string">~ @name</MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    }
+}
+
+@code {
+    private const string StorageKey = "obsidian.vaultPath";
+
+    private ObsidianExportResult? _result;
+    private string? _error;
+    private string? _vaultPath;
+    private bool _busy;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _vaultPath = await Js.InvokeAsync<string?>("localStorage.getItem", StorageKey);
+        StateHasChanged();
+    }
+
+    private Task PreviewAsync() => RunAsync(dryRun: true);
+
+    private Task SyncAsync() => RunAsync(dryRun: false);
+
+    private async Task RunAsync(bool dryRun)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Js.InvokeVoidAsync("localStorage.setItem", StorageKey, _vaultPath ?? "");
+            _result = await Exporter.ExportAsync(dryRun, vaultPath: _vaultPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _result = null;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
