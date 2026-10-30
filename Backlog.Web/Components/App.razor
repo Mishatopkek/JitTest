@@ -37,6 +37,34 @@
         // Turns off the pre-hydration fallback in app.css once the real theme
         // is known. See the comment at the top of that file.
         window.setTheme = t => document.documentElement.setAttribute('data-theme', t);
+
+        // A native drag only scrolls the page within a few pixels of the window
+        // edge, and at the top those pixels sit under the app bar. This scrolls
+        // within 120px of either edge, faster the closer the pointer gets.
+        // dragover fires about every 50ms even with the pointer held still, so
+        // 250ms without one means the drag ended or left the window
+        (() => {
+            const zone = 120, maxStep = 30;
+            let y = 0, seen = 0, frame = 0;
+
+            const tick = () => {
+                if (performance.now() - seen > 250) { frame = 0; return; }
+                const h = window.innerHeight;
+                const depth = y < zone ? y - zone : y > h - zone ? y - (h - zone) : 0;
+                if (depth) window.scrollBy(0, Math.round(depth / zone * maxStep));
+                frame = requestAnimationFrame(tick);
+            };
+
+            document.addEventListener('dragover', e => {
+                y = e.clientY;
+                seen = performance.now();
+                if (!frame) frame = requestAnimationFrame(tick);
+            });
+
+            const stop = () => { seen = 0; };
+            document.addEventListener('drop', stop);
+            document.addEventListener('dragend', stop);
+        })();
     </script>
 </body>
 
