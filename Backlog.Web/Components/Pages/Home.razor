@@ -84,7 +84,8 @@ else
                      Tags="_tags"
                      Parts="@PartsOf(context)"
                      OnChanged="ReloadAsync"
-                     OnUnrank="@(() => UnrankAsync(context))" />
+                     OnUnrank="@(() => UnrankAsync(context))"
+                     OnMove="@(rank => MoveAsync(context, rank))" />
         </ItemRenderer>
     </MudDropContainer>
 
@@ -359,6 +360,17 @@ else
         list.RemoveAt(from);
         list.Insert(to, drop.Item);
 
+        await SaveOrderAsync();
+    }
+
+    // Works while filtered, unlike a drop: the target is a real rank, not an
+    // index into the rendered list, and the save still sends the whole list
+    private async Task MoveAsync(Game game, int rank)
+    {
+        var list = _board!.Ranked;
+        if (!list.Remove(game)) return;
+
+        list.Insert(Math.Clamp(rank - 1, 0, list.Count), game);
         await SaveOrderAsync();
     }
 

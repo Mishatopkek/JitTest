@@ -16,10 +16,32 @@
         {
             <MudIcon Icon="@Icons.Material.Rounded.DragIndicator" Size="Size.Small"
                      Class="@(Draggable ? "mud-text-secondary" : "mud-text-disabled")" />
-            <MudText Typo="Typo.body2" Color="Color.Primary"
-                     Style="min-width:2.25rem;font-variant-numeric:tabular-nums;font-weight:600">
-                @Position
-            </MudText>
+            @if (_moving)
+            {
+                @* Same width as the number it replaces, so the row doesn't shift *@
+                <div style="flex:0 0 2.25rem;width:2.25rem">
+                    <MudNumericField T="int?" @bind-Value="_moveTo" Min="1" HideSpinButtons="true"
+                                     Immediate="true" Margin="Margin.None" Variant="Variant.Text"
+                                     Typo="Typo.body2" Placeholder="@Position.ToString()"
+                                     OnKeyDown="OnMoveKey" OnBlur="CancelMove" AutoFocus="true"
+                                     title="Type a position, Enter to move, Esc to cancel" />
+                </div>
+            }
+            else if (OnMove.HasDelegate)
+            {
+                <MudLink Typo="Typo.body2" Color="Color.Primary" Underline="Underline.None"
+                         OnClick="@(() => _moving = true)" title="Move to a position"
+                         Style="min-width:2.25rem;font-variant-numeric:tabular-nums;font-weight:600;cursor:pointer">
+                    @Position
+                </MudLink>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Primary"
+                         Style="min-width:2.25rem;font-variant-numeric:tabular-nums;font-weight:600">
+                    @Position
+                </MudText>
+            }
         }
 
         @* Whole-game toggle. On a split game this sets EVERY part, because the
@@ -166,6 +188,9 @@
     [Parameter] public EventCallback OnRank { get; set; }
     [Parameter] public EventCallback OnUnrank { get; set; }
 
+    // Takes the 1-based rank to move to
+    [Parameter] public EventCallback<int> OnMove { get; set; }
+
     /// <summary>
     /// The games inside this purchase, empty when it is not split. Handed down
     /// rather than fetched here: the board holds every row's parts already, and
@@ -180,13 +205,15 @@
     private bool _open;
     private bool _tagging;
     private string? _newTag;
+    private bool _moving;
+    private int? _moveTo;
 
     // What was on screen at the last render. The board re-renders all ~240 rows
     // on every keystroke in the search box and every tag chip, and diffing a row
     // whose inputs did not move is pure cost. Game is a record and the board
     // hands out fresh instances on reload, so equality here is both cheap and
     // exact: unchanged row, unchanged instance, no re-render.
-    private (Game?, int?, bool, List<string>?, List<Part>?, bool, bool, string?) _rendered;
+    private (Game?, int?, bool, List<string>?, List<Part>?, bool, bool, string?, bool, int?) _rendered;
 
     private string NameClass => Game.Finished ? "mud-text-disabled" : "";
 
@@ -205,7 +232,7 @@
 
     protected override bool ShouldRender()
     {
-        var now = (Game, Position, Draggable, Tags, Parts, _open, _tagging, _newTag);
+        var now = (Game, Position, Draggable, Tags, Parts, _open, _tagging, _newTag, _moving, _moveTo);
         if (_rendered == now) return false;
 
         _rendered = now;
@@ -241,6 +268,28 @@
     {
         if (e.Key == "Enter") await AddTagAsync();
         else if (e.Key == "Escape") { _tagging = false; _newTag = null; }
+    }
+
+    private async Task OnMoveKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await MoveAsync();
+        else if (e.Key == "Escape") CancelMove();
+    }
+
+    private void CancelMove()
+    {
+        _moving = false;
+        _moveTo = null;
+    }
+
+    private async Task MoveAsync()
+    {
+        var to = _moveTo;
+        _moving = false;
+        _moveTo = null;
+        if (to is null || to == Position) return;
+
+        await OnMove.InvokeAsync(to.Value);
     }
 
     private async Task AddTagAsync()
